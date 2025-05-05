@@ -1,0 +1,19 @@
+[package]
+name = "amae-clinic-api"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = { workspace = true }
+tokio = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Internal dependencies
+auth-cell = { workspace = true }
+shared-config = { workspace = true }
+shared-utils = { workspace = true }

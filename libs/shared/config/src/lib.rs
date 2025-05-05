@@ -1,0 +1,43 @@
+use std::env;
+use tracing::warn;
+
+#[derive(Debug, Clone)]
+pub struct AppConfig {
+    pub supabase_url: String,
+    pub supabase_anon_key: String,
+    pub supabase_jwt_secret: String,
+}
+
+impl AppConfig {
+    pub fn from_env() -> Self {
+        let config = Self {
+            supabase_url: env::var("SUPABASE_URL")
+                .unwrap_or_else(|_| {
+                    warn!("SUPABASE_URL not set, using empty value");
+                    String::new()
+                }),
+            supabase_anon_key: env::var("SUPABASE_ANON_KEY")
+                .unwrap_or_else(|_| {
+                    warn!("SUPABASE_ANON_KEY not set, using empty value");
+                    String::new()
+                }),
+            supabase_jwt_secret: env::var("SUPABASE_JWT_SECRET")
+                .unwrap_or_else(|_| {
+                    warn!("SUPABASE_JWT_SECRET not set, using empty value");
+                    String::new()
+                }),
+        };
+        
+        if !config.is_configured() {
+            warn!("Application not fully configured - missing environment variables");
+        }
+        
+        config
+    }
+    
+    pub fn is_configured(&self) -> bool {
+        !self.supabase_url.is_empty() 
+            && !self.supabase_anon_key.is_empty()
+            && !self.supabase_jwt_secret.is_empty()
+    }
+}

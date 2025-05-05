@@ -1,0 +1,18 @@
+[package]
+name = "auth-cell"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+
+shared-config = { workspace = true }
+shared-models = { workspace = true }
+shared-database = { workspace = true }
+shared-utils = { workspace = true }
