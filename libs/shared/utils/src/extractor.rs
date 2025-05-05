@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{State, FromRef},
-    http::{Request, StatusCode},
+    extract::State,
+    http::Request,
     middleware::Next,
     response::Response,
-    RequestExt,
+    body::Body,
 };
 
 use shared_models::auth::User;
@@ -14,11 +14,11 @@ use shared_config::AppConfig;
 
 use crate::jwt::validate_token;
 
-// Middleware for authentication
-pub async fn auth_middleware<B>(
+// Middleware for authentication - Fixed to use concrete body type
+pub async fn auth_middleware(
     State(config): State<Arc<AppConfig>>,
-    mut request: Request<B>,
-    next: Next<B>,
+    mut request: Request<Body>,
+    next: Next,
 ) -> Result<Response, AppError> {
     // Extract token from headers
     let auth_header = request
@@ -43,7 +43,7 @@ pub async fn auth_middleware<B>(
     // Add user to request extensions
     request.extensions_mut().insert(user);
     
-    // Continue with the request
+    // Continue with the request - Now with matching types
     Ok(next.run(request).await)
 }
 

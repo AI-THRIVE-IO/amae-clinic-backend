@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::Router;
+use tokio::net::TcpListener;
 use tower_http::cors::{CorsLayer, Any};
 use tower_http::trace::{self, TraceLayer};
 use tracing::{Level, info};
@@ -49,9 +49,9 @@ async fn main() {
     // Run the server
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
     info!("Listening on {}", addr);
-    
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
+
+    let listener = TcpListener::bind(addr).await.unwrap();
+    axum::serve(listener, app)
         .await
         .unwrap();
 }
