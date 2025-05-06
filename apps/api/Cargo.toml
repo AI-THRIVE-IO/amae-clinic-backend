@@ -16,5 +16,6 @@ dotenv ={ workspace = true }
 
 # Internal dependencies
 auth-cell = { workspace = true }
+health-profile-cell = { workspace = true }
 shared-config = { workspace = true }
 shared-utils = { workspace = true }
