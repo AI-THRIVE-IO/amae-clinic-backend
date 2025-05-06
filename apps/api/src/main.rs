@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
-
+use dotenv::dotenv;
 use tokio::net::TcpListener;
 use tower_http::cors::{CorsLayer, Any};
 use tower_http::trace::{self, TraceLayer};
@@ -13,6 +13,9 @@ use shared_config::AppConfig;
 
 #[tokio::main]
 async fn main() {
+    // Loading Env Vars
+    dotenv().ok();
+
     // Initialize tracing
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(

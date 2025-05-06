@@ -16,9 +16,9 @@ impl AppConfig {
                     warn!("SUPABASE_URL not set, using empty value");
                     String::new()
                 }),
-            supabase_anon_key: env::var("SUPABASE_ANON_KEY")
+            supabase_anon_key: env::var("SUPABASE_ANON_PUBLIC_KEY")
                 .unwrap_or_else(|_| {
-                    warn!("SUPABASE_ANON_KEY not set, using empty value");
+                    warn!("SUPABASE_ANON_PUBLIC_KEY not set, using empty value");
                     String::new()
                 }),
             supabase_jwt_secret: env::var("SUPABASE_JWT_SECRET")
