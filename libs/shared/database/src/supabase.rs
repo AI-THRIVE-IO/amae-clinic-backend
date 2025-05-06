@@ -107,4 +107,13 @@ impl SupabaseClient {
         
         Ok(result[0].clone())
     }
+
+    pub fn get_base_url(&self) -> &str {
+        &self.base_url
+    }
+
+    // Method to get public URL for a storage path
+    pub fn get_public_url(&self, storage_path: &str) -> String {
+        format!("{}{}", self.base_url, storage_path)
+    }
 }

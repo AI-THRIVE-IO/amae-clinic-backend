@@ -33,6 +33,7 @@ dependencies = [
  "auth-cell",
  "axum",
  "dotenv",
+ "health-profile-cell",
  "serde",
  "serde_json",
  "shared-config",
@@ -529,6 +530,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "54b4a22553d4242c49fddb9ba998a99962b5cc6f22cb5a3482bec22522403ce4"
 dependencies = [
  "http",
+]
+
+[[package]]
+name = "health-profile-cell"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "auth-cell",
+ "axum",
+ "axum-extra",
+ "base64 0.22.1",
+ "chrono",
+ "headers",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "shared-config",
+ "shared-database",
+ "shared-models",
+ "shared-utils",
+ "tokio",
+ "tower",
+ "tower-http",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -1458,6 +1484,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum",
+ "axum-extra",
  "base64 0.22.1",
  "chrono",
  "hmac",
@@ -1467,6 +1494,7 @@ dependencies = [
  "sha2",
  "shared-config",
  "shared-models",
+ "tower",
  "tracing",
 ]
 

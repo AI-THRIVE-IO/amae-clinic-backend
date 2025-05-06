@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "apps/api",
     "libs/auth-cell",
+    "libs/health-profile-cell",
     "libs/shared/config",
     "libs/shared/database",
     "libs/shared/models",
@@ -33,6 +34,8 @@ thiserror = "2.0.12"
 reqwest = { version = "0.12.15", features = ["json"] }
 base64 = "0.22.1"
 dotenv = "0.15.0"
+async-trait = "0.1.77"
+
 
 # Internal dependencies
 auth-cell = { path = "libs/auth-cell" }
@@ -40,3 +43,4 @@ shared-config = { path = "libs/shared/config" }
 shared-database = { path = "libs/shared/database" }
 shared-models = { path = "libs/shared/models" }
 shared-utils = { path = "libs/shared/utils" }
+health-profile-cell = { path = "libs/health-profile-cell" }
