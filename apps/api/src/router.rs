@@ -10,6 +10,7 @@ use shared_config::AppConfig;
 
 pub fn create_router(state: Arc<AppConfig>) -> Router {
     Router::new()
+        .route("/", get(|| async { "Amae Clinic API is running!" }))
         .route("/health", get(health_check))
         .nest("/auth", auth_routes(state.clone()))
         // Other cells added later
