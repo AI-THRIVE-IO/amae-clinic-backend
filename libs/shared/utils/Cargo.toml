@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-async-trait = "0.1.77"
 base64 = { workspace = true }
 hmac = { workspace = true }
 sha2 = { workspace = true }
@@ -14,6 +13,7 @@ chrono = { workspace = true }
 tracing = { workspace = true }
 axum = { workspace = true }
 http = { workspace = true }
+async-trait = { workspace = true }
 
 shared-models = { workspace = true }
 shared-config = { workspace = true }
