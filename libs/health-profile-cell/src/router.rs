@@ -12,8 +12,6 @@ use shared_utils::extractor::auth_middleware;
 use crate::handlers;
 
 pub fn health_profile_routes(state: Arc<AppConfig>) -> Router {
-    // Public routes - none for health profiles as all require auth
-    
     // Protected routes
     let protected_routes = Router::new()
         // Health profile endpoints
