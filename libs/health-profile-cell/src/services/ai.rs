@@ -210,9 +210,9 @@ impl AiService {
         let plan_data = json!({
             "patient_id": patient_id,
             "condition": condition,
-            "diet_guidance": sections.get("diet_guidance").unwrap_or(&"").to_string(),
-            "activity_targets": sections.get("activity_targets").unwrap_or(&"").to_string(),
-            "monitoring_instructions": sections.get("monitoring_instructions").unwrap_or(&"").to_string(),
+            "diet_guidance": sections.get("diet_guidance").cloned().unwrap_or_else(|| String::new()),
+            "activity_targets": sections.get("activity_targets").cloned().unwrap_or_else(|| String::new()),
+            "monitoring_instructions": sections.get("monitoring_instructions").cloned().unwrap_or_else(|| String::new()),
             "ai_recommendations": care_plan_text,
             "last_updated": chrono::Utc::now().to_rfc3339()
         });

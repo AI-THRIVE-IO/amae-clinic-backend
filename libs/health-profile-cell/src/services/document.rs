@@ -62,13 +62,10 @@ impl DocumentService {
                 "contentType": file_type
             })),
         ).await?;
-        
+
+        let storage_path = format!("/storage/v1/object/public/patient_documents/{}", filename);
         // Get public URL
-        let public_url = format!(
-            "{}/storage/v1/object/public/patient_documents/{}", 
-            self.supabase.base_url, 
-            filename
-        );
+        let public_url = self.supabase.get_public_url(&storage_path);
         
         // Create document record in database
         let doc_path = "/rest/v1/documents";

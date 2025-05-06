@@ -60,12 +60,10 @@ impl AvatarService {
             })),
         ).await?;
         
+        let storage_path = format!("/storage/v1/object/public/profiles/{}", filename);
         // Extract public URL
-        let public_url = format!(
-            "{}/storage/v1/object/public/profiles/{}", 
-            self.supabase.base_url, 
-            filename
-        );
+        let public_url = self.supabase.get_public_url(&storage_path);
+
         
         // Update the health profile with the new avatar URL
         let update_path = format!("/rest/v1/health_profiles?patient_id=eq.{}", patient_id);
