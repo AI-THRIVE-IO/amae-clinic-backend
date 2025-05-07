@@ -111,8 +111,8 @@ impl HealthProfileService {
             
             let patient_data = json!({
                 "id": patient_id,
-                "full_name": "Patient", // Default name
-                "email": "test@test_email.com", // Can be updated later
+                "full_name": "Juan Pablo Gaviria", // Default name
+                "email": "jp.gaviria@ai-thrive.io", // Can be updated later
                 "created_at": chrono::Utc::now().to_rfc3339(),
                 "updated_at": chrono::Utc::now().to_rfc3339()
             });
