@@ -105,14 +105,14 @@ impl HealthProfileService {
             None,
         ).await?;
         
-        // If patient doesn't exist, create one
+        // If patient doesn't exist, create one | REVISE BEFORE PRODUCTION!!!
         if patient_result.is_empty() {
             debug!("Patient not found, creating patient record first");
             
             let patient_data = json!({
                 "id": patient_id,
                 "full_name": "Patient", // Default name
-                "email": "", // Can be updated later
+                "email": "test@test_email.com", // Can be updated later
                 "created_at": chrono::Utc::now().to_rfc3339(),
                 "updated_at": chrono::Utc::now().to_rfc3339()
             });
