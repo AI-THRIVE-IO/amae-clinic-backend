@@ -3,6 +3,8 @@ use reqwest::Method;
 use serde_json::{json, Value};
 use tracing::{debug, error};
 use uuid::Uuid;
+use headers::HeaderMap;
+use headers::HeaderValue;
 
 use shared_config::AppConfig;
 use shared_database::supabase::SupabaseClient;
@@ -120,12 +122,17 @@ impl HealthProfileService {
                 "created_at": chrono::Utc::now().to_rfc3339(),
                 "updated_at": chrono::Utc::now().to_rfc3339()
             });
+
+            // Use the single prefer header to get back the created record
+            let mut headers = HeaderMap::new();
+            headers.insert("Prefer", HeaderValue::from_static("return=representation"));
             
-            let _: Vec<Value> = self.supabase.request(
+            let _: Value = self.supabase.request_with_headers(
                 Method::POST,
                 "/rest/v1/patients",
                 Some(auth_token),
                 Some(patient_data),
+                Some(headers.clone()),
             ).await?;
             
             debug!("Patient record created successfully");
@@ -134,24 +141,39 @@ impl HealthProfileService {
         // Now create the health profile
         let profile_data = json!({
             "patient_id": patient_id,
+            "first_name" : "Juan Pablo", // <--- TESTING PURPOSES ONLY! | REPLACE IN PRODUCTION
+            "last_name" : "Gaviria",    // <--- TESTING PURPOSES ONLY! | REPLACE IN PRODUCTION
             "created_at": chrono::Utc::now().to_rfc3339(),
             "updated_at": chrono::Utc::now().to_rfc3339(),
         });
+
+        // Add prefer header to get back created record
+        let mut headers = HeaderMap::new();
+        headers.insert("Prefer", HeaderValue::from_static("return=representation"));
         
         let path = "/rest/v1/health_profiles";
         
-        let result: Vec<Value> = self.supabase.request(
+        let result: Vec<Value> = self.supabase.request_with_headers(
             Method::POST,
             path,
             Some(auth_token),
             Some(profile_data),
+            Some(headers),
         ).await?;
         
         if result.is_empty() {
             return Err(anyhow!("Failed to create health profile"));
         }
         
-        let new_profile: HealthProfile = serde_json::from_value(result[0].clone())?;
+        let new_profile = match serde_json::from_value::<HealthProfile>(result[0].clone()) {
+            Ok(profile) => profile,
+            Err(e) => {
+                debug!("Error deserializing profile: {}", e);
+                debug!("Raw JSON: {}", result[0]);
+                return Err(anyhow!("Failed to deserialize health profile: {}", e));
+            }
+        };
+        
         Ok(new_profile)
     }
 }

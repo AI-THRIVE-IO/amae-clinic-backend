@@ -37,6 +37,7 @@ dotenv = "0.15.0"
 async-trait = "0.1.77"
 
 
+
 # Internal dependencies
 auth-cell = { path = "libs/auth-cell" }
 shared-config = { path = "libs/shared/config" }
