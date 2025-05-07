@@ -141,8 +141,6 @@ impl HealthProfileService {
         // Now create the health profile
         let profile_data = json!({
             "patient_id": patient_id,
-            "first_name" : "Juan Pablo", // <--- TESTING PURPOSES ONLY! | REPLACE IN PRODUCTION
-            "last_name" : "Gaviria",    // <--- TESTING PURPOSES ONLY! | REPLACE IN PRODUCTION
             "created_at": chrono::Utc::now().to_rfc3339(),
             "updated_at": chrono::Utc::now().to_rfc3339(),
         });
