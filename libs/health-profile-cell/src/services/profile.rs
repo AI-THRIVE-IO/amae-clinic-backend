@@ -113,6 +113,8 @@ impl HealthProfileService {
                 "id": patient_id,
                 "full_name": "Juan Pablo Gaviria", // Default name
                 "email": "jp.gaviria@ai-thrive.io", // Can be updated later
+                "date_of_birth": "1990-01-01",
+                "gender": "Male",
                 "created_at": chrono::Utc::now().to_rfc3339(),
                 "updated_at": chrono::Utc::now().to_rfc3339()
             });
