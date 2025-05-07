@@ -115,6 +115,7 @@ impl HealthProfileService {
                 "email": "jp.gaviria@ai-thrive.io", // Can be updated later
                 "date_of_birth": "1990-01-01",
                 "gender": "Male",
+                "phone_number": "+573169644441",
                 "created_at": chrono::Utc::now().to_rfc3339(),
                 "updated_at": chrono::Utc::now().to_rfc3339()
             });
