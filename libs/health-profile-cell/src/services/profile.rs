@@ -95,6 +95,39 @@ impl HealthProfileService {
     ) -> Result<HealthProfile> {
         debug!("Creating health profile for patient: {}", patient_id);
         
+        // First check if patient exists
+        let patient_path = format!("/rest/v1/patients?id=eq.{}", patient_id);
+        
+        let patient_result: Vec<Value> = self.supabase.request(
+            Method::GET,
+            &patient_path,
+            Some(auth_token),
+            None,
+        ).await?;
+        
+        // If patient doesn't exist, create one
+        if patient_result.is_empty() {
+            debug!("Patient not found, creating patient record first");
+            
+            let patient_data = json!({
+                "id": patient_id,
+                "full_name": "Patient", // Default name
+                "email": "", // Can be updated later
+                "created_at": chrono::Utc::now().to_rfc3339(),
+                "updated_at": chrono::Utc::now().to_rfc3339()
+            });
+            
+            let _: Vec<Value> = self.supabase.request(
+                Method::POST,
+                "/rest/v1/patients",
+                Some(auth_token),
+                Some(patient_data),
+            ).await?;
+            
+            debug!("Patient record created successfully");
+        }
+        
+        // Now create the health profile
         let profile_data = json!({
             "patient_id": patient_id,
             "created_at": chrono::Utc::now().to_rfc3339(),
