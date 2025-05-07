@@ -116,6 +116,7 @@ impl HealthProfileService {
                 "date_of_birth": "1990-01-01",
                 "gender": "Male",
                 "phone_number": "+573169644441",
+                "address": "Cali,Col",
                 "created_at": chrono::Utc::now().to_rfc3339(),
                 "updated_at": chrono::Utc::now().to_rfc3339()
             });
