@@ -235,7 +235,7 @@ impl HealthProfileService {
             &profile_path,
             Some(auth_token),
             None,
-            None,  // No special headers needed for GET
+            None,
         ).await?;
         
         if profiles.is_empty() {
@@ -243,13 +243,20 @@ impl HealthProfileService {
         }
         
         // Delete the profile
-        let delete_path = format!("/rest/v1/health_profiles?patient_id=eq.{}", patient_id);
+        let delete_path = format!("/rest/v1/health_profiles?id=eq.{}", 
+            profiles[0]["id"].as_str().unwrap_or(""));
         
-        let _: Value = self.supabase.request(
+        // Add headers to properly handle the response
+        let mut headers = HeaderMap::new();
+        headers.insert("Prefer", HeaderValue::from_static("return=minimal"));
+        
+        // Use request_with_headers with the proper return type
+        let _: () = self.supabase.request_with_headers(
             Method::DELETE,
             &delete_path,
             Some(auth_token),
             None,
+            Some(headers),
         ).await?;
         
         Ok(())

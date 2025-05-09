@@ -117,59 +117,66 @@ impl SupabaseClient {
         format!("{}{}", self.base_url, storage_path)
     }
 
-    pub async fn request_with_headers<T>(&self, method: Method, path: &str,
-                                        auth_token: Option<&str>, body: Option<Value>,
-                                        additional_headers: Option<HeaderMap>) 
-                                        -> Result<T> 
-    where T: DeserializeOwned {
-        let url = format!("{}{}", self.base_url, path);
-        debug!("Making request to {}", url);
-        
-        let mut headers = self.get_headers(auth_token);
-        
-        // Add additional headers if provided
-        if let Some(add_headers) = additional_headers {
-            for (name, value) in add_headers.iter() {
-                headers.insert(name.clone(), value.clone());
-            }
+pub async fn request_with_headers<T>(&self, method: Method, path: &str,
+                                     auth_token: Option<&str>, body: Option<Value>,
+                                     additional_headers: Option<HeaderMap>) 
+                                     -> Result<T> 
+where T: DeserializeOwned + Default {  // Add Default trait bound
+    let url = format!("{}{}", self.base_url, path);
+    debug!("Making request to {}", url);
+    
+    let mut headers = self.get_headers(auth_token);
+    
+    // Add additional headers if provided
+    if let Some(add_headers) = additional_headers {
+        for (name, value) in add_headers.iter() {
+            headers.insert(name.clone(), value.clone());
         }
+    }
+    
+    let mut req = self.client.request(method, &url)
+        .headers(headers);
         
-        let mut req = self.client.request(method, &url)
-            .headers(headers);
-            
-        if let Some(body_data) = body {
-            req = req.json(&body_data);
+    if let Some(body_data) = body {
+        req = req.json(&body_data);
+    }
+    
+    let response = req.send().await?;
+    
+    let status = response.status();
+    if !status.is_success() {
+        let error_text = response.text().await?;
+        error!("API error ({}): {}", status, error_text);
+        
+        return Err(match status.as_u16() {
+            401 | 403 => anyhow!("Authentication error: {}", error_text),
+            404 => anyhow!("Resource not found: {}", error_text),
+            _ => anyhow!("API error ({}): {}", status, error_text),
+        });
+    }
+    
+    // Using bytes() allows us to keep the body data for debugging
+    let bytes = response.bytes().await?;
+    
+    // If bytes are empty and T: Default, return default value (handles empty responses)
+    if bytes.is_empty() {
+        debug!("Empty response body, returning default value for type");
+        return Ok(T::default());
+    }
+    
+    let body_text = String::from_utf8_lossy(&bytes);
+    debug!("Response body: {}", body_text);
+    
+    // Parse using the bytes
+    let data = match serde_json::from_slice::<T>(&bytes) {
+        Ok(parsed) => parsed,
+        Err(e) => {
+            error!("Failed to parse response: {} - Raw body: {}", e, body_text);
+            return Err(anyhow!("Failed to parse response: {}", e));
         }
-        
-        let response = req.send().await?;
-        
-        let status = response.status();
-        if !status.is_success() {
-            let error_text = response.text().await?;
-            error!("API error ({}): {}", status, error_text);
-            
-            return Err(match status.as_u16() {
-                401 | 403 => anyhow!("Authentication error: {}", error_text),
-                404 => anyhow!("Resource not found: {}", error_text),
-                _ => anyhow!("API error ({}): {}", status, error_text),
-            });
-        }
-        
-        // Using bytes() allows us to keep the body data for debugging
-        let bytes = response.bytes().await?;
-        let body_text = String::from_utf8_lossy(&bytes);
-        debug!("Response body: {}", body_text);
-        
-        // Parse using the bytes
-        let data = match serde_json::from_slice::<T>(&bytes) {
-            Ok(parsed) => parsed,
-            Err(e) => {
-                error!("Failed to parse response: {} - Raw body: {}", e, body_text);
-                return Err(anyhow!("Failed to parse response: {}", e));
-            }
-        };
-        
-        Ok(data)
+    };
+    
+    Ok(data)
     }
 
 }
