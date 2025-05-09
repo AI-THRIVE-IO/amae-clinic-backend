@@ -101,7 +101,7 @@ impl HealthProfileService {
                 return Err(anyhow!("Failed to deserialize health profile: {}", e));
             }
         };
-        
+
         Ok(updated_profile)
     }
     
@@ -110,15 +110,16 @@ impl HealthProfileService {
         patient_id: &str, 
         auth_token: &str
     ) -> Result<HealthProfile> {
-        debug!("Creating health profile for patient: {}", patient_id);
+        debug!("Processing health profile for patient: {}", patient_id);
         
         // First check if patient exists
         let patient_path = format!("/rest/v1/patients?id=eq.{}", patient_id);
         
-        let patient_result: Vec<Value> = self.supabase.request(
+        let patient_result: Vec<Value> = self.supabase.request_with_headers(
             Method::GET,
             &patient_path,
             Some(auth_token),
+            None,
             None,
         ).await?;
         
@@ -152,7 +153,35 @@ impl HealthProfileService {
             
             debug!("Patient record created successfully");
         }
+        // Step 3: Check if health profile already exists
+        let profile_path = format!("/rest/v1/health_profiles?patient_id=eq.{}", patient_id);
         
+        let existing_profiles: Vec<Value> = self.supabase.request_with_headers(
+            Method::GET,
+            &profile_path,
+            Some(auth_token),
+            None,
+            None,
+        ).await?;
+        // Step 4: If profile exists, return it (don't create duplicate)
+        if !existing_profiles.is_empty() {
+            debug!("Health profile already exists, returning existing profile");
+            
+            // Parse existing profile
+            let existing_profile = match serde_json::from_value::<HealthProfile>(existing_profiles[0].clone()) {
+                Ok(profile) => profile,
+                Err(e) => {
+                    debug!("Error deserializing existing profile: {}", e);
+                    return Err(anyhow!("Failed to deserialize existing health profile: {}", e));
+                }
+            };
+            
+            return Ok(existing_profile);
+    }
+
+        // Step 5: Create new health profile
+        debug!("No health profile found, creating new one");
+
         // Now create the health profile
         let profile_data = json!({
             "patient_id": patient_id,
@@ -175,9 +204,10 @@ impl HealthProfileService {
         ).await?;
         
         if result.is_empty() {
-            return Err(anyhow!("Failed to create health profile"));
+            return Err(anyhow!("Failed to create health profile - np response returned"));
         }
         
+        // Parse the new profile with error handling
         let new_profile = match serde_json::from_value::<HealthProfile>(result[0].clone()) {
             Ok(profile) => profile,
             Err(e) => {
@@ -186,7 +216,43 @@ impl HealthProfileService {
                 return Err(anyhow!("Failed to deserialize health profile: {}", e));
             }
         };
-        
+        debug!("Health profile created successfully with ID: {}", new_profile.id);
         Ok(new_profile)
     }
+
+    pub async fn delete_profile(
+        &self, 
+        patient_id: &str, 
+        auth_token: &str
+    ) -> Result<()> {
+        debug!("Deleting health profile for patient: {}", patient_id);
+        
+        // First get the profile ID
+        let profile_path = format!("/rest/v1/health_profiles?patient_id=eq.{}", patient_id);
+        
+        let profiles: Vec<Value> = self.supabase.request_with_headers(
+            Method::GET,
+            &profile_path,
+            Some(auth_token),
+            None,
+            None,  // No special headers needed for GET
+        ).await?;
+        
+        if profiles.is_empty() {
+            return Err(anyhow!("Health profile not found"));
+        }
+        
+        // Delete the profile
+        let delete_path = format!("/rest/v1/health_profiles?patient_id=eq.{}", patient_id);
+        
+        let _: Value = self.supabase.request(
+            Method::DELETE,
+            &delete_path,
+            Some(auth_token),
+            None,
+        ).await?;
+        
+        Ok(())
+    }
+    
 }

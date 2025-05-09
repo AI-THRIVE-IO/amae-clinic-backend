@@ -100,6 +100,31 @@ pub async fn create_health_profile(
     Ok(Json(json!(new_profile)))
 }
 
+#[axum::debug_handler]
+pub async fn delete_health_profile(
+    State(state): State<Arc<AppConfig>>,
+    Path(id): Path<String>,
+    Extension(user): Extension<User>,
+    TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
+) -> Result<Json<Value>, AppError> {
+    // Get token from TypedHeader
+    let token = auth.token();
+    
+    // Check authorization
+    if id != user.id {
+        return Err(AppError::Auth("Not authorized to delete this health profile".to_string()));
+    }
+    
+    // Create profile service
+    let profile_service = HealthProfileService::new(&state);
+    
+    // Delete health profile
+    profile_service.delete_profile(&id, token).await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    
+    Ok(Json(json!({ "success": true })))
+}
+
 // Avatar Handlers
 
 #[axum::debug_handler]

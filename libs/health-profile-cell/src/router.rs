@@ -18,6 +18,7 @@ pub fn health_profile_routes(state: Arc<AppConfig>) -> Router {
         .route("/health-profiles/{id}", get(handlers::get_health_profile))
         .route("/health-profiles/{id}", put(handlers::update_health_profile))
         .route("/health-profiles", post(handlers::create_health_profile))
+        .route("/health-profiles/{id}", delete(handlers::delete_health_profile))
         
         // Avatar endpoints
         .route("/health-profiles/{id}/avatar", post(handlers::upload_avatar))
