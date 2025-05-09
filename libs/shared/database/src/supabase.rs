@@ -117,14 +117,10 @@ impl SupabaseClient {
         format!("{}{}", self.base_url, storage_path)
     }
 
-    pub async fn request_with_headers<T>(
-        &self, 
-        method: Method, 
-        path: &str,
-        auth_token: Option<&str>, 
-        body: Option<Value>,
-        additional_headers: Option<HeaderMap>
-    ) -> Result<T> 
+    pub async fn request_with_headers<T>(&self, method: Method, path: &str,
+                                        auth_token: Option<&str>, body: Option<Value>,
+                                        additional_headers: Option<HeaderMap>) 
+                                        -> Result<T> 
     where T: DeserializeOwned {
         let url = format!("{}{}", self.base_url, path);
         debug!("Making request to {}", url);

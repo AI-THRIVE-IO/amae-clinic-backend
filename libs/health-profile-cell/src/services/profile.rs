@@ -74,19 +74,34 @@ impl HealthProfileService {
         }
         
         let path = format!("/rest/v1/health_profiles?id=eq.{}", profile_id);
+
+        // Add the Prefer header to get the updated record back
+        let mut headers = HeaderMap::new();
+        headers.insert("Prefer", HeaderValue::from_static("return=representation"));
         
-        let result: Vec<Value> = self.supabase.request(
+        // Use request_with_headers instead of request
+        let result: Vec<Value> = self.supabase.request_with_headers(
             Method::PATCH,
             &path,
             Some(auth_token),
             Some(update_json),
+            Some(headers),
         ).await?;
         
         if result.is_empty() {
             return Err(anyhow!("Failed to update health profile"));
         }
         
-        let updated_profile: HealthProfile = serde_json::from_value(result[0].clone())?;
+            // Better error handling for deserialization
+        let updated_profile = match serde_json::from_value::<HealthProfile>(result[0].clone()) {
+            Ok(profile) => profile,
+            Err(e) => {
+                debug!("Error deserializing profile: {}", e);
+                debug!("Raw JSON: {}", result[0]);
+                return Err(anyhow!("Failed to deserialize health profile: {}", e));
+            }
+        };
+        
         Ok(updated_profile)
     }
     
@@ -115,10 +130,10 @@ impl HealthProfileService {
                 "id": patient_id,
                 "full_name": "Juan Pablo Gaviria", // Default name
                 "email": "jp.gaviria@ai-thrive.io", // Can be updated later
-                "date_of_birth": "1990-01-01",
-                "gender": "Male",
-                "phone_number": "+573169644441",
-                "address": "Cali,Col",
+                "date_of_birth": "1990-01-01", // <-- Remove on Production
+                "gender": "Male", // <-- Remove on Production
+                "phone_number": "+573169644441", // <-- Remove on Production
+                "address": "Cali,Col", // <-- Remove on production
                 "created_at": chrono::Utc::now().to_rfc3339(),
                 "updated_at": chrono::Utc::now().to_rfc3339()
             });
