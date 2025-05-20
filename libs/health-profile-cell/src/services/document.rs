@@ -47,10 +47,10 @@ impl DocumentService {
             file_type
         };
         
-        let filename = format!("Patient Pocuments/{}/{}.{}", patient_id, file_id, file_ext);
+        let filename = format!("patient-documents/{}/{}.{}", patient_id, file_id, file_ext);
         
         // Upload to Supabase storage
-        let path = format!("/storage/v1/object/Patient Documents/{}", filename);
+        let path = format!("/storage/v1/object/patient-documents/{}", filename);
         
         // Perform upload request
         let upload_result: Value = self.supabase.request(
@@ -63,7 +63,7 @@ impl DocumentService {
             })),
         ).await?;
 
-        let storage_path = format!("/storage/v1/object/public/Patient Documents/{}", filename);
+        let storage_path = format!("/storage/v1/object/public/patient-documents/{}", filename);
         // Get public URL
         let public_url = self.supabase.get_public_url(&storage_path);
         
@@ -151,9 +151,9 @@ impl DocumentService {
         let doc = self.get_document(document_id, auth_token).await?;
         
         // Extract filename from URL
-        if let Some(filename) = doc.file_url.split("Patient Documents/").nth(1) {
+        if let Some(filename) = doc.file_url.split("patient-documents/").nth(1) {
             // Delete from storage
-            let storage_path = format!("/storage/v1/object/Patient Documents/{}", filename);
+            let storage_path = format!("/storage/v1/object/patient-documents/{}", filename);
             
             let _: Value = self.supabase.request(
                 Method::DELETE,
