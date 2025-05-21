@@ -114,16 +114,30 @@ impl SupabaseClient {
 
     // Method to get public URL for a storage path
     pub fn get_public_url(&self, storage_path: &str) -> String {
-        format!("{}{}", self.base_url, storage_path)
+        // If storage_path already contains the base URL, don't duplicate it
+        if storage_path.starts_with("http") {
+            return storage_path.to_string();
+        }
+        
+        // Ensure storage_path starts with a proper prefix for public URLs
+        let formatted_path = if storage_path.starts_with("/storage/v1/object/public/") {
+            storage_path.to_string()
+        } else if storage_path.starts_with("/storage/v1/object/") {
+            storage_path.replace("/storage/v1/object/", "/storage/v1/object/public/")
+        } else {
+            format!("/storage/v1/object/public/{}", storage_path)
+        };
+        
+        format!("{}{}", self.base_url, formatted_path)
     }
 
-pub async fn request_with_headers<T>(&self, method: Method, path: &str,
-                                     auth_token: Option<&str>, body: Option<Value>,
-                                     additional_headers: Option<HeaderMap>) 
-                                     -> Result<T> 
-where T: DeserializeOwned + Default {  // Add Default trait bound
-    let url = format!("{}{}", self.base_url, path);
-    debug!("Making request to {}", url);
+    pub async fn request_with_headers<T>(&self, method: Method, path: &str,
+                                        auth_token: Option<&str>, body: Option<Value>,
+                                        additional_headers: Option<HeaderMap>) 
+                                        -> Result<T> 
+    where T: DeserializeOwned + Default {  // Add Default trait bound
+        let url = format!("{}{}", self.base_url, path);
+        debug!("Making request to {}", url);
     
     let mut headers = self.get_headers(auth_token);
     

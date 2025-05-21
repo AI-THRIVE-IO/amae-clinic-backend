@@ -25,7 +25,10 @@ pub fn validate_token(token: &str, jwt_secret: &str) -> Result<User, String> {
     // Verify signature
     let signature = match URL_SAFE_NO_PAD.decode(signature_b64) {
         Ok(sig) => sig,
-        Err(_) => return Err("Invalid signature encoding".to_string()),
+        Err(e) => {
+            debug!("Failed to decode signature: {}", e);
+            return Err("Invalid signature encoding".to_string());
+        }
     };
 
     // Create signature string
