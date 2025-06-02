@@ -60,3 +60,8 @@ pub struct CarePlanRequest {
     pub patient_id: Uuid,
     pub condition: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateHealthProfileRequest {
+    pub patient_id: String,
+}

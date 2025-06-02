@@ -3,26 +3,20 @@ use std::sync::Arc;
 use axum::{
     extract::{Path, State, Extension},
     Json,
-    http::Request,
-    body::Body,
 };
 use axum_extra::TypedHeader;
 use headers::{Authorization, authorization::Bearer};
 use serde_json::{json, Value};
-use tracing::debug;
-use uuid::Uuid;
 
 use shared_config::AppConfig;
 use shared_models::auth::User;
 use shared_models::error::AppError;
 
+use crate::services::profile::HealthProfileService;
+use crate::services::avatar::AvatarService;
+use crate::services::document::DocumentService;
+use crate::services::ai::AiService;
 use crate::models::{UpdateHealthProfile, DocumentUpload, AvatarUpload, CarePlanRequest};
-use crate::services::{
-    profile::HealthProfileService,
-    avatar::AvatarService,
-    document::DocumentService,
-    ai::AiService,
-};
 
 // Health Profile Handlers
 
@@ -81,22 +75,54 @@ pub async fn update_health_profile(
     Ok(Json(json!(updated_profile)))
 }
 
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct CreateHealthProfileRequest {
+    pub patient_id: String,
+}
+
 #[axum::debug_handler]
 pub async fn create_health_profile(
     State(state): State<Arc<AppConfig>>,
-    Extension(user): Extension<User>,
     TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
+    Extension(user): Extension<User>,
+    Json(payload): Json<CreateHealthProfileRequest>,
 ) -> Result<Json<Value>, AppError> {
-    // Get token from TypedHeader
     let token = auth.token();
-    
+
+    // Require patient_id in request
+    let patient_id = payload.patient_id.trim();
+    if patient_id.is_empty() {
+        return Err(AppError::BadRequest("patient_id is required".to_string()));
+    }
+
+    // Only allow doctors or the patient themselves to create a health profile
+    // (Assume user.role is available, adjust as needed)
+    let is_doctor = user.role.as_deref() == Some("doctor");
+    let is_self = user.id == patient_id;
+    if !is_doctor && !is_self {
+        return Err(AppError::Auth("Not authorized to create health profile for this patient".to_string()));
+    }
+
     // Create profile service
     let profile_service = HealthProfileService::new(&state);
-    
+
+    // Validate patient exists
+    let patient_path = format!("/rest/v1/patients?id=eq.{}", patient_id);
+    let patient_result: Vec<serde_json::Value> = profile_service.supabase().request_with_headers(
+        reqwest::Method::GET,
+        &patient_path,
+        Some(token),
+        None,
+        None,
+    ).await.map_err(|_| AppError::NotFound("Patient not found".to_string()))?;
+    if patient_result.is_empty() {
+        return Err(AppError::NotFound("Patient not found".to_string()));
+    }
+
     // Create health profile
-    let new_profile = profile_service.create_profile(&user.id, token).await
+    let new_profile = profile_service.create_profile(patient_id, token).await
         .map_err(|e| AppError::Internal(e.to_string()))?;
-    
+
     Ok(Json(json!(new_profile)))
 }
 

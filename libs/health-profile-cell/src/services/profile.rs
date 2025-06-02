@@ -21,6 +21,10 @@ impl HealthProfileService {
             supabase: SupabaseClient::new(config),
         }
     }
+
+    pub fn supabase(&self) -> &SupabaseClient {
+        &self.supabase
+    }
     
     pub async fn get_profile(&self, patient_id: &str, auth_token: &str) -> Result<HealthProfile> {
         debug!("Fetching health profile for patient: {}", patient_id);
@@ -111,10 +115,9 @@ impl HealthProfileService {
         auth_token: &str
     ) -> Result<HealthProfile> {
         debug!("Processing health profile for patient: {}", patient_id);
-        
-        // First check if patient exists
+
+        // Check if patient exists
         let patient_path = format!("/rest/v1/patients?id=eq.{}", patient_id);
-        
         let patient_result: Vec<Value> = self.supabase.request_with_headers(
             Method::GET,
             &patient_path,
@@ -122,40 +125,13 @@ impl HealthProfileService {
             None,
             None,
         ).await?;
-        
-        // If patient doesn't exist, create one | REVISE BEFORE PRODUCTION!!!
         if patient_result.is_empty() {
-            debug!("Patient not found, creating patient record first");
-            
-            let patient_data = json!({
-                "id": patient_id,
-                "full_name": "Juan Pablo Gaviria", // Default name
-                "email": "jp.gaviria@ai-thrive.io", // Can be updated later
-                "date_of_birth": "1990-01-01", // <-- Remove on Production
-                "gender": "Male", // <-- Remove on Production
-                "phone_number": "+573169644441", // <-- Remove on Production
-                "address": "Cali,Col", // <-- Remove on production
-                "created_at": chrono::Utc::now().to_rfc3339(),
-                "updated_at": chrono::Utc::now().to_rfc3339()
-            });
-
-            // Use the single prefer header to get back the created record
-            let mut headers = HeaderMap::new();
-            headers.insert("Prefer", HeaderValue::from_static("return=representation"));
-            
-            let _: Value = self.supabase.request_with_headers(
-                Method::POST,
-                "/rest/v1/patients",
-                Some(auth_token),
-                Some(patient_data),
-                Some(headers.clone()),
-            ).await?;
-            
-            debug!("Patient record created successfully");
+            debug!("Patient not found, aborting health profile creation");
+            return Err(anyhow!("Patient not found"));
         }
-        // Step 3: Check if health profile already exists
+
+        // Check if health profile already exists
         let profile_path = format!("/rest/v1/health_profiles?patient_id=eq.{}", patient_id);
-        
         let existing_profiles: Vec<Value> = self.supabase.request_with_headers(
             Method::GET,
             &profile_path,
@@ -163,11 +139,8 @@ impl HealthProfileService {
             None,
             None,
         ).await?;
-        // Step 4: If profile exists, return it (don't create duplicate)
         if !existing_profiles.is_empty() {
             debug!("Health profile already exists, returning existing profile");
-            
-            // Parse existing profile
             let existing_profile = match serde_json::from_value::<HealthProfile>(existing_profiles[0].clone()) {
                 Ok(profile) => profile,
                 Err(e) => {
@@ -175,26 +148,20 @@ impl HealthProfileService {
                     return Err(anyhow!("Failed to deserialize existing health profile: {}", e));
                 }
             };
-            
             return Ok(existing_profile);
-    }
+        }
 
-        // Step 5: Create new health profile
+        // Create new health profile
         debug!("No health profile found, creating new one");
-
-        // Now create the health profile
         let profile_data = json!({
             "patient_id": patient_id,
             "created_at": chrono::Utc::now().to_rfc3339(),
             "updated_at": chrono::Utc::now().to_rfc3339(),
         });
 
-        // Add prefer header to get back created record
         let mut headers = HeaderMap::new();
         headers.insert("Prefer", HeaderValue::from_static("return=representation"));
-        
         let path = "/rest/v1/health_profiles";
-        
         let result: Vec<Value> = self.supabase.request_with_headers(
             Method::POST,
             path,
@@ -202,12 +169,11 @@ impl HealthProfileService {
             Some(profile_data),
             Some(headers),
         ).await?;
-        
+
         if result.is_empty() {
-            return Err(anyhow!("Failed to create health profile - np response returned"));
+            return Err(anyhow!("Failed to create health profile - no response returned"));
         }
-        
-        // Parse the new profile with error handling
+
         let new_profile = match serde_json::from_value::<HealthProfile>(result[0].clone()) {
             Ok(profile) => profile,
             Err(e) => {
