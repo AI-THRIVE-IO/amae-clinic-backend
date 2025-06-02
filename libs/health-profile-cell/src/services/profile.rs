@@ -53,7 +53,7 @@ impl HealthProfileService {
         auth_token: &str
     ) -> Result<HealthProfile> {
         debug!("Updating health profile: {}", profile_id);
-        
+
         // Calculate BMI if both height and weight are provided
         let mut bmi = None;
         if let (Some(height_cm), Some(weight_kg)) = (update_data.height_cm, update_data.weight_kg) {
@@ -62,41 +62,40 @@ impl HealthProfileService {
                 bmi = Some(weight_kg as f64 / (height_m * height_m));
             }
         }
-        
-        let mut update_json = json!({
-            "blood_type": update_data.blood_type,
-            "height_cm": update_data.height_cm,
-            "weight_kg": update_data.weight_kg,
-            "allergies": update_data.allergies,
-            "chronic_conditions": update_data.chronic_conditions,
-            "medications": update_data.medications,
-            "updated_at": chrono::Utc::now().to_rfc3339(),
-        });
-        
+
+        // Only include fields that are Some
+        let mut update_json = serde_json::Map::new();
+        if let Some(ref v) = update_data.blood_type { update_json.insert("blood_type".to_string(), json!(v)); }
+        if let Some(v) = update_data.height_cm { update_json.insert("height_cm".to_string(), json!(v)); }
+        if let Some(v) = update_data.weight_kg { update_json.insert("weight_kg".to_string(), json!(v)); }
+        if let Some(ref v) = update_data.allergies { update_json.insert("allergies".to_string(), json!(v)); }
+        if let Some(ref v) = update_data.chronic_conditions { update_json.insert("chronic_conditions".to_string(), json!(v)); }
+        if let Some(ref v) = update_data.medications { update_json.insert("medications".to_string(), json!(v)); }
+        if let Some(v) = update_data.is_pregnant { update_json.insert("is_pregnant".to_string(), json!(v)); }
+        if let Some(v) = update_data.is_breastfeeding { update_json.insert("is_breastfeeding".to_string(), json!(v)); }
+        if let Some(ref v) = update_data.reproductive_stage { update_json.insert("reproductive_stage".to_string(), json!(v)); }
+        update_json.insert("updated_at".to_string(), json!(chrono::Utc::now().to_rfc3339()));
         if let Some(bmi_value) = bmi {
-            update_json["bmi"] = json!(bmi_value);
+            update_json.insert("bmi".to_string(), json!(bmi_value));
         }
-        
+
         let path = format!("/rest/v1/health_profiles?id=eq.{}", profile_id);
 
-        // Add the Prefer header to get the updated record back
         let mut headers = HeaderMap::new();
         headers.insert("Prefer", HeaderValue::from_static("return=representation"));
-        
-        // Use request_with_headers instead of request
+
         let result: Vec<Value> = self.supabase.request_with_headers(
             Method::PATCH,
             &path,
             Some(auth_token),
-            Some(update_json),
+            Some(Value::Object(update_json)),
             Some(headers),
         ).await?;
-        
+
         if result.is_empty() {
             return Err(anyhow!("Failed to update health profile"));
         }
-        
-            // Better error handling for deserialization
+
         let updated_profile = match serde_json::from_value::<HealthProfile>(result[0].clone()) {
             Ok(profile) => profile,
             Err(e) => {

@@ -53,25 +53,37 @@ pub async fn update_health_profile(
     TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
     Json(update_data): Json<UpdateHealthProfile>,
 ) -> Result<Json<Value>, AppError> {
-    // Get token from TypedHeader
     let token = auth.token();
-    
-    // Check authorization
     if id != user.id {
         return Err(AppError::Auth("Not authorized to update this health profile".to_string()));
     }
-    
-    // Create profile service
     let profile_service = HealthProfileService::new(&state);
-    
-    // Get current profile to get the ID
+
     let current_profile = profile_service.get_profile(&id, token).await
         .map_err(|_| AppError::NotFound("Health profile not found".to_string()))?;
-    
-    // Update health profile
+
+    // Fetch patient gender for validation
+    let patient_path = format!("/rest/v1/patients?id=eq.{}", id);
+    let patient_result: Vec<serde_json::Value> = profile_service.supabase().request_with_headers(
+        reqwest::Method::GET,
+        &patient_path,
+        Some(token),
+        None,
+        None,
+    ).await.map_err(|_| AppError::NotFound("Patient not found".to_string()))?;
+    let gender = patient_result[0]["gender"].as_str().unwrap_or("").to_lowercase();
+
+    if gender != "female" && (
+        update_data.is_pregnant.unwrap_or(false) ||
+        update_data.is_breastfeeding.unwrap_or(false) ||
+        update_data.reproductive_stage.as_ref().map(|s| !s.is_empty()).unwrap_or(false)
+    ) {
+        return Err(AppError::ValidationError("Female-specific fields can only be set for female patients".to_string()));
+    }
+
     let updated_profile = profile_service.update_profile(&current_profile.id.to_string(), update_data, token).await
         .map_err(|e| AppError::Internal(e.to_string()))?;
-    
+
     Ok(Json(json!(updated_profile)))
 }
 
