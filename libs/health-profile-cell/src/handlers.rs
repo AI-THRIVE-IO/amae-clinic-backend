@@ -78,6 +78,9 @@ pub async fn update_health_profile(
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct CreateHealthProfileRequest {
     pub patient_id: String,
+    pub is_pregnant: Option<bool>,
+    pub is_breastfeeding: Option<bool>,
+    pub reproductive_stage: Option<String>,
 }
 
 #[axum::debug_handler]
@@ -97,6 +100,7 @@ pub async fn create_health_profile(
 
     // Only allow doctors or the patient themselves to create a health profile
     // (Assume user.role is available, adjust as needed)
+    // Revise Doctor role when on Doctor related cell
     let is_doctor = user.role.as_deref() == Some("doctor");
     let is_self = user.id == patient_id;
     if !is_doctor && !is_self {
@@ -106,7 +110,7 @@ pub async fn create_health_profile(
     // Create profile service
     let profile_service = HealthProfileService::new(&state);
 
-    // Validate patient exists
+    // Validate patient exists and get gender
     let patient_path = format!("/rest/v1/patients?id=eq.{}", patient_id);
     let patient_result: Vec<serde_json::Value> = profile_service.supabase().request_with_headers(
         reqwest::Method::GET,
@@ -118,9 +122,23 @@ pub async fn create_health_profile(
     if patient_result.is_empty() {
         return Err(AppError::NotFound("Patient not found".to_string()));
     }
+    let gender = patient_result[0]["gender"].as_str().unwrap_or("").to_lowercase();
 
-    // Create health profile
-    let new_profile = profile_service.create_profile(patient_id, token).await
+    if gender != "female" && (
+        payload.is_pregnant.unwrap_or(false) ||
+        payload.is_breastfeeding.unwrap_or(false) ||
+        payload.reproductive_stage.as_ref().map(|s| !s.is_empty()).unwrap_or(false)
+    ) {
+        return Err(AppError::ValidationError("Female-specific fields can only be set for female patients".to_string()));
+    }
+
+    let new_profile = profile_service.create_profile(
+        patient_id,
+        token,
+        payload.is_pregnant,
+        payload.is_breastfeeding,
+        payload.reproductive_stage.clone(),
+    ).await
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
     Ok(Json(json!(new_profile)))

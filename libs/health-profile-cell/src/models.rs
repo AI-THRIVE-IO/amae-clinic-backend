@@ -26,6 +26,9 @@ pub struct UpdateHealthProfile {
     pub allergies: Option<String>,
     pub chronic_conditions: Option<Vec<String>>,
     pub medications: Option<String>,
+    pub is_pregnant: Option<bool>,
+    pub is_breastfeeding: Option<bool>,
+    pub reproductive_stage: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,4 +67,7 @@ pub struct CarePlanRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateHealthProfileRequest {
     pub patient_id: String,
+    pub is_pregnant: Option<bool>,
+    pub is_breastfeeding: Option<bool>,
+    pub reproductive_stage: Option<String>,
 }

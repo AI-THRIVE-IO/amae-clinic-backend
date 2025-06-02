@@ -112,7 +112,11 @@ impl HealthProfileService {
     pub async fn create_profile(
         &self, 
         patient_id: &str, 
-        auth_token: &str
+        auth_token: &str,
+        // Add optional female-only fields
+        is_pregnant: Option<bool>,
+        is_breastfeeding: Option<bool>,
+        reproductive_stage: Option<String>,
     ) -> Result<HealthProfile> {
         debug!("Processing health profile for patient: {}", patient_id);
 
@@ -153,11 +157,23 @@ impl HealthProfileService {
 
         // Create new health profile
         debug!("No health profile found, creating new one");
-        let profile_data = json!({
+        let mut profile_data = json!({
             "patient_id": patient_id,
             "created_at": chrono::Utc::now().to_rfc3339(),
             "updated_at": chrono::Utc::now().to_rfc3339(),
         });
+
+        if let Some(val) = is_pregnant {
+            profile_data["is_pregnant"] = json!(val);
+        }
+        if let Some(val) = is_breastfeeding {
+            profile_data["is_breastfeeding"] = json!(val);
+        }
+        if let Some(ref val) = reproductive_stage {
+            if !val.is_empty() {
+                profile_data["reproductive_stage"] = json!(val);
+            }
+        }
 
         let mut headers = HeaderMap::new();
         headers.insert("Prefer", HeaderValue::from_static("return=representation"));
