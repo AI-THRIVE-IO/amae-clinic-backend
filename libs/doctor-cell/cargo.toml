@@ -18,11 +18,11 @@ uuid = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
+base64 = { workspace = true }
 
 # Internal dependencies
 auth-cell = { workspace = true }
 health-profile-cell = { workspace = true }
-doctor-cell = { workspace = true }
 shared-config = { workspace = true }
 shared-database = { workspace = true }
 shared-models = { workspace = true }

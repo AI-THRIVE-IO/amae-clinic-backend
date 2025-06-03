@@ -339,6 +339,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "doctor-cell"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "auth-cell",
+ "axum",
+ "axum-extra",
+ "base64 0.22.1",
+ "chrono",
+ "headers",
+ "health-profile-cell",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "shared-config",
+ "shared-database",
+ "shared-models",
+ "shared-utils",
+ "tokio",
+ "tower",
+ "tower-http",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "dotenv"
 version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

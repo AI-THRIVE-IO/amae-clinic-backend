@@ -8,6 +8,7 @@ members = [
     "libs/shared/database",
     "libs/shared/models",
     "libs/shared/utils",
+    "libs/doctor-cell",
 ]
 
 [workspace.dependencies]
@@ -45,3 +46,4 @@ shared-database = { path = "libs/shared/database" }
 shared-models = { path = "libs/shared/models" }
 shared-utils = { path = "libs/shared/utils" }
 health-profile-cell = { path = "libs/health-profile-cell" }
+doctor-cell = { path = "libs/doctor-cell" }
