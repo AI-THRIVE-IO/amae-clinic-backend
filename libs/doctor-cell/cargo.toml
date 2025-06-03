@@ -21,6 +21,8 @@ async-trait = { workspace = true }
 
 # Internal dependencies
 auth-cell = { workspace = true }
+health-profile-cell = { workspace = true }
+doctor-cell = { workspace = true }
 shared-config = { workspace = true }
 shared-database = { workspace = true }
 shared-models = { workspace = true }
