@@ -1,5 +1,5 @@
 use anyhow::{Result, anyhow};
-use chrono::{DateTime, Utc, NaiveDate, NaiveTime, Datelike, Weekday, TimeZone, Duration};
+use chrono::{NaiveDate, NaiveTime, DateTime, Utc, Datelike, Weekday, Duration};
 use reqwest::Method;
 use serde_json::{json, Value};
 use tracing::{debug, warn};
@@ -267,7 +267,7 @@ impl AvailabilityService {
                 query.date,
                 &existing_appointments,
                 query.duration_minutes,
-                &query.timezone.unwrap_or_else(|| schedule.timezone.clone()),
+                query.timezone.as_deref().unwrap_or(schedule.timezone.as_str()),
             ).await?;
 
             available_slots.extend(slots);
@@ -476,7 +476,7 @@ impl AvailabilityService {
             )?;
 
             // Check for overlap
-            if (start_time < existing_end && end_time > existing_start) {
+            if start_time < existing_end && end_time > existing_start {
                 return Err(anyhow!("Availability conflicts with existing schedule"));
             }
         }

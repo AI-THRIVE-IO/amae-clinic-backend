@@ -1,9 +1,8 @@
 use anyhow::{Result, anyhow};
-use chrono::{NaiveDate, NaiveTime, Utc};
+use chrono::{NaiveDate, NaiveTime};
 use reqwest::Method;
-use serde_json::{json, Value};
+use serde_json::{Value};
 use tracing::{debug, info};
-use uuid::Uuid;
 
 use shared_config::AppConfig;
 use shared_database::supabase::SupabaseClient;
@@ -91,7 +90,11 @@ impl DoctorMatchingService {
 
         info!("Found {} matching doctors with average score: {:.2}", 
               doctor_matches.len(),
-              doctor_matches.iter().map(|m| m.match_score).sum::<f32>() / doctor_matches.len() as f32);
+              if !doctor_matches.is_empty() {
+                  doctor_matches.iter().map(|m| m.match_score as f32).sum::<f32>() / doctor_matches.len() as f32
+              } else {
+                  0.0
+              });
 
         Ok(doctor_matches)
     }
@@ -366,20 +369,20 @@ impl DoctorMatchingService {
         // Doctor rating (15% weight)
         let rating_weight = 0.15;
         let rating_score = (doctor.rating / 5.0).min(1.0);
-        score += rating_weight * rating_score;
+        score += rating_weight * rating_score as f64;
         max_score += rating_weight;
 
         // Experience (10% weight)
         let experience_weight = 0.1;
         if let Some(years_exp) = doctor.years_experience {
             let experience_score = (years_exp as f32 / 20.0).min(1.0); // Max out at 20 years
-            score += experience_weight * experience_score;
+            score += experience_weight * experience_score as f64;
         }
         max_score += experience_weight;
 
         // Normalize score to 0-1 range
         if max_score > 0.0 {
-            score / max_score
+            (score / max_score) as f32
         } else {
             0.0
         }

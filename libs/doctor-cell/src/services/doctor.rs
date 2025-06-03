@@ -2,7 +2,7 @@ use anyhow::{Result, anyhow};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use reqwest::Method;
 use serde_json::{json, Value};
-use tracing::{debug, error};
+use tracing::{debug};
 use uuid::Uuid;
 use chrono::Utc;
 
