@@ -9,6 +9,7 @@ members = [
     "libs/shared/models",
     "libs/shared/utils",
     "libs/doctor-cell",
+    "libs/appointment-cell",
 ]
 
 [workspace.dependencies]
