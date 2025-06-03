@@ -30,8 +30,10 @@ dependencies = [
 name = "amae-clinic-api"
 version = "0.1.0"
 dependencies = [
+ "appointment-cell",
  "auth-cell",
  "axum",
+ "doctor-cell",
  "dotenv",
  "health-profile-cell",
  "serde",

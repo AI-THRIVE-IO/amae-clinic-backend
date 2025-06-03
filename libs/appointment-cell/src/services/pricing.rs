@@ -1,4 +1,5 @@
 use anyhow::Result;
+use std::sync::Arc;
 use tracing::{debug, info};
 
 use shared_database::supabase::SupabaseClient;
@@ -6,14 +7,14 @@ use shared_database::supabase::SupabaseClient;
 use crate::models::{AppointmentType, AppointmentPricing, AppointmentError};
 
 pub struct PricingService {
-    _supabase: SupabaseClient,
+    supabase: Arc<SupabaseClient>,
     pricing_rules: Vec<AppointmentPricing>,
 }
 
 impl PricingService {
-    pub fn new(supabase: SupabaseClient) -> Self {
+    pub fn new(supabase: Arc<SupabaseClient>) -> Self {
         Self {
-            _supabase: supabase,
+            supabase,
             pricing_rules: AppointmentPricing::get_standard_pricing(),
         }
     }
@@ -150,7 +151,7 @@ mod tests {
             supabase_jwt_secret: "test".to_string(),
         };
         let supabase = SupabaseClient::new(&config);
-        PricingService::new(supabase)
+        PricingService::new(Arc::new(supabase))
     }
 
     #[tokio::test]

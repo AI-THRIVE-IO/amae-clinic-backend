@@ -4,6 +4,7 @@ use reqwest::Method;
 use serde_json::{json, Value};
 use tracing::{debug, info, warn, error};
 use uuid::Uuid;
+use std::sync::Arc;
 
 use shared_config::AppConfig;
 use shared_database::supabase::SupabaseClient;
@@ -21,7 +22,7 @@ use crate::services::conflict::ConflictDetectionService;
 use crate::services::lifecycle::AppointmentLifecycleService;
 
 pub struct AppointmentBookingService {
-    supabase: SupabaseClient,
+    supabase: Arc<SupabaseClient>,
     pricing_service: PricingService,
     conflict_service: ConflictDetectionService,
     lifecycle_service: AppointmentLifecycleService,
@@ -31,13 +32,18 @@ pub struct AppointmentBookingService {
 
 impl AppointmentBookingService {
     pub fn new(config: &AppConfig) -> Self {
-        let supabase = SupabaseClient::new(config);
-        
+        let supabase = Arc::new(SupabaseClient::new(config));
+
+        let pricing_service = PricingService::new(Arc::clone(&supabase));
+        let conflict_service = ConflictDetectionService::new(Arc::clone(&supabase));
+        let lifecycle_service = AppointmentLifecycleService::new(Arc::clone(&supabase));
+        let availability_service = AvailabilityService::new(config);
+
         Self {
-            pricing_service: PricingService::new(&supabase),
-            conflict_service: ConflictDetectionService::new(&supabase),
-            lifecycle_service: AppointmentLifecycleService::new(&supabase),
-            availability_service: AvailabilityService::new(config),
+            pricing_service,
+            conflict_service,
+            lifecycle_service,
+            availability_service,
             supabase,
             validation_rules: AppointmentValidationRules::default(),
         }
@@ -389,6 +395,20 @@ impl AppointmentBookingService {
             average_consultation_duration,
             appointment_type_breakdown,
         })
+    }
+
+    /// Public method to check appointment conflicts (for handler use)
+    pub async fn check_conflicts(
+        &self,
+        doctor_id: Uuid,
+        start_time: chrono::DateTime<chrono::Utc>,
+        end_time: chrono::DateTime<chrono::Utc>,
+        exclude_appointment_id: Option<Uuid>,
+        auth_token: &str,
+    ) -> Result<crate::models::ConflictCheckResponse, crate::models::AppointmentError> {
+        self.conflict_service
+            .check_conflicts(doctor_id, start_time, end_time, exclude_appointment_id, auth_token)
+            .await
     }
 
     // ==============================================================================

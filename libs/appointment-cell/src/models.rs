@@ -59,7 +59,7 @@ impl fmt::Display for AppointmentStatus {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq,Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum AppointmentType {
     GeneralConsultation,  // Standard consultation
