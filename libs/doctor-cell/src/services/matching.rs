@@ -1,0 +1,561 @@
+use anyhow::{Result, anyhow};
+use chrono::{NaiveDate, NaiveTime, Utc};
+use reqwest::Method;
+use serde_json::{json, Value};
+use tracing::{debug, info};
+use uuid::Uuid;
+
+use shared_config::AppConfig;
+use shared_database::supabase::SupabaseClient;
+
+use crate::models::{
+    Doctor, DoctorMatch, DoctorMatchingRequest, AvailableSlot,
+    DoctorSearchFilters, AvailabilityQueryRequest
+};
+use crate::services::doctor::DoctorService;
+use crate::services::availability::AvailabilityService;
+
+pub struct DoctorMatchingService {
+    supabase: SupabaseClient,
+    doctor_service: DoctorService,
+    availability_service: AvailabilityService,
+}
+
+impl DoctorMatchingService {
+    pub fn new(config: &AppConfig) -> Self {
+        Self {
+            supabase: SupabaseClient::new(config),
+            doctor_service: DoctorService::new(config),
+            availability_service: AvailabilityService::new(config),
+        }
+    }
+
+    /// Find best matching doctors for a patient's requirements
+    pub async fn find_matching_doctors(
+        &self,
+        request: DoctorMatchingRequest,
+        auth_token: &str,
+        max_results: Option<usize>,
+    ) -> Result<Vec<DoctorMatch>> {
+        debug!("Finding matching doctors for patient: {}", request.patient_id);
+
+        // Get patient information to help with matching
+        let patient_info = self.get_patient_info(&request.patient_id.to_string(), auth_token).await?;
+
+        // Build search filters based on request
+        let search_filters = DoctorSearchFilters {
+            specialty: request.specialty_required.clone(),
+            sub_specialty: None,
+            min_experience: None,
+            max_consultation_fee: request.max_consultation_fee,
+            min_rating: Some(3.0), // Minimum acceptable rating
+            available_date: request.preferred_date,
+            available_time_start: request.preferred_time_start,
+            available_time_end: request.preferred_time_end,
+            timezone: Some(request.timezone.clone()),
+            appointment_type: Some(request.appointment_type.clone()),
+            is_verified_only: Some(true), // Only verified doctors
+        };
+
+        // Search for potentially matching doctors
+        let candidate_doctors = self.doctor_service.search_doctors(
+            search_filters,
+            auth_token,
+            Some(50), // Get more candidates for better matching
+            None,
+        ).await?;
+
+        debug!("Found {} candidate doctors", candidate_doctors.len());
+
+        let mut doctor_matches = Vec::new();
+
+        // Evaluate each candidate doctor
+        for doctor in candidate_doctors {
+            if let Ok(doctor_match) = self.evaluate_doctor_match(
+                &doctor,
+                &request,
+                &patient_info,
+                auth_token,
+            ).await {
+                doctor_matches.push(doctor_match);
+            }
+        }
+
+        // Sort by match score (highest first)
+        doctor_matches.sort_by(|a, b| b.match_score.partial_cmp(&a.match_score).unwrap());
+
+        // Apply limit
+        if let Some(limit) = max_results {
+            doctor_matches.truncate(limit);
+        }
+
+        info!("Found {} matching doctors with average score: {:.2}", 
+              doctor_matches.len(),
+              doctor_matches.iter().map(|m| m.match_score).sum::<f32>() / doctor_matches.len() as f32);
+
+        Ok(doctor_matches)
+    }
+
+    /// Find the single best matching doctor
+    pub async fn find_best_doctor(
+        &self,
+        request: DoctorMatchingRequest,
+        auth_token: &str,
+    ) -> Result<Option<DoctorMatch>> {
+        let matches = self.find_matching_doctors(request, auth_token, Some(1)).await?;
+        Ok(matches.into_iter().next())
+    }
+
+    /// Find doctors available at a specific time
+    pub async fn find_available_doctors(
+        &self,
+        date: NaiveDate,
+        preferred_time_start: Option<NaiveTime>,
+        preferred_time_end: Option<NaiveTime>,
+        appointment_type: String,
+        duration_minutes: i32,
+        timezone: String,
+        specialty_filter: Option<String>,
+        auth_token: &str,
+    ) -> Result<Vec<DoctorMatch>> {
+        debug!("Finding available doctors for {} at time range {:?}-{:?}", 
+               date, preferred_time_start, preferred_time_end);
+
+        // Get all active, verified doctors
+        let search_filters = DoctorSearchFilters {
+            specialty: specialty_filter,
+            sub_specialty: None,
+            min_experience: None,
+            max_consultation_fee: None,
+            min_rating: Some(3.0),
+            available_date: Some(date),
+            available_time_start: preferred_time_start,
+            available_time_end: preferred_time_end,
+            timezone: Some(timezone.clone()),
+            appointment_type: Some(appointment_type.clone()),
+            is_verified_only: Some(true),
+        };
+
+        let doctors = self.doctor_service.search_doctors(
+            search_filters,
+            auth_token,
+            None,
+            None,
+        ).await?;
+
+        let mut available_doctors = Vec::new();
+
+        for doctor in doctors {
+            // Get available slots for this doctor
+            let availability_query = AvailabilityQueryRequest {
+                date,
+                timezone: Some(timezone.clone()),
+                appointment_type: Some(appointment_type.clone()),
+                duration_minutes: Some(duration_minutes),
+            };
+
+            let available_slots = self.availability_service.get_available_slots(
+                &doctor.id.to_string(),
+                availability_query,
+                auth_token,
+            ).await?;
+
+            // Filter slots by preferred time if specified
+            let filtered_slots = if let (Some(start), Some(end)) = (preferred_time_start, preferred_time_end) {
+                available_slots.into_iter()
+                    .filter(|slot| {
+                        let slot_time = slot.start_time.time();
+                        slot_time >= start && slot_time <= end
+                    })
+                    .collect()
+            } else {
+                available_slots
+            };
+
+            if !filtered_slots.is_empty() {
+                // Calculate a simple availability score
+                let match_score = self.calculate_availability_score(&doctor, &filtered_slots);
+                
+                available_doctors.push(DoctorMatch {
+                    doctor,
+                    available_slots: filtered_slots,
+                    match_score,
+                    match_reasons: vec!["Available at requested time".to_string()],
+                });
+            }
+        }
+
+        // Sort by match score
+        available_doctors.sort_by(|a, b| b.match_score.partial_cmp(&a.match_score).unwrap());
+
+        Ok(available_doctors)
+    }
+
+    /// Get recommended doctors based on patient history and preferences
+    pub async fn get_recommended_doctors(
+        &self,
+        patient_id: &str,
+        specialty: Option<String>,
+        auth_token: &str,
+        limit: Option<usize>,
+    ) -> Result<Vec<DoctorMatch>> {
+        debug!("Getting recommended doctors for patient: {}", patient_id);
+
+        // Get patient's previous appointments to understand preferences
+        let patient_history = self.get_patient_appointment_history(patient_id, auth_token).await?;
+        
+        // Get patient info
+        let patient_info = self.get_patient_info(patient_id, auth_token).await?;
+
+        // Build recommendation filters
+        let mut search_filters = DoctorSearchFilters {
+            specialty: specialty.clone(),
+            sub_specialty: None,
+            min_experience: Some(2), // Prefer experienced doctors
+            max_consultation_fee: None,
+            min_rating: Some(4.0), // Higher rating for recommendations
+            available_date: None,
+            available_time_start: None,
+            available_time_end: None,
+            timezone: patient_info.get("timezone").and_then(|v| v.as_str()).map(String::from),
+            appointment_type: None,
+            is_verified_only: Some(true),
+        };
+
+        // Analyze patient history for preferences
+        if let Some(avg_fee) = self.calculate_average_consultation_fee(&patient_history) {
+            search_filters.max_consultation_fee = Some(avg_fee * 1.2); // Allow 20% higher than average
+        }
+
+        let candidate_doctors = self.doctor_service.search_doctors(
+            search_filters,
+            auth_token,
+            Some(20),
+            None,
+        ).await?;
+
+        let mut recommendations = Vec::new();
+
+        for doctor in candidate_doctors {
+            let recommendation_score = self.calculate_recommendation_score(
+                &doctor,
+                &patient_history,
+                &patient_info,
+            );
+
+            if recommendation_score > 0.5 { // Only include good recommendations
+                recommendations.push(DoctorMatch {
+                    doctor,
+                    available_slots: vec![], // Will be filled when needed
+                    match_score: recommendation_score,
+                    match_reasons: self.generate_recommendation_reasons(&patient_history),
+                });
+            }
+        }
+
+        // Sort by recommendation score
+        recommendations.sort_by(|a, b| b.match_score.partial_cmp(&a.match_score).unwrap());
+
+        if let Some(limit_val) = limit {
+            recommendations.truncate(limit_val);
+        }
+
+        Ok(recommendations)
+    }
+
+    // Private helper methods
+
+    async fn evaluate_doctor_match(
+        &self,
+        doctor: &Doctor,
+        request: &DoctorMatchingRequest,
+        patient_info: &Value,
+        auth_token: &str,
+    ) -> Result<DoctorMatch> {
+        // Get available slots for the doctor
+        let available_slots = if let Some(date) = request.preferred_date {
+            let availability_query = AvailabilityQueryRequest {
+                date,
+                timezone: Some(request.timezone.clone()),
+                appointment_type: Some(request.appointment_type.clone()),
+                duration_minutes: Some(request.duration_minutes),
+            };
+
+            self.availability_service.get_available_slots(
+                &doctor.id.to_string(),
+                availability_query,
+                auth_token,
+            ).await.unwrap_or_default()
+        } else {
+            vec![]
+        };
+
+        // Calculate match score
+        let match_score = self.calculate_match_score(doctor, request, patient_info, &available_slots);
+        
+        // Generate match reasons
+        let match_reasons = self.generate_match_reasons(doctor, request, &available_slots);
+
+        Ok(DoctorMatch {
+            doctor: doctor.clone(),
+            available_slots,
+            match_score,
+            match_reasons,
+        })
+    }
+
+    fn calculate_match_score(
+        &self,
+        doctor: &Doctor,
+        request: &DoctorMatchingRequest,
+        _patient_info: &Value,
+        available_slots: &[AvailableSlot],
+    ) -> f32 {
+        let mut score = 0.0;
+        let mut max_score = 0.0;
+
+        // Specialty match (30% weight)
+        let specialty_weight = 0.3;
+        if let Some(ref required_specialty) = request.specialty_required {
+            if doctor.specialty.to_lowercase().contains(&required_specialty.to_lowercase()) {
+                score += specialty_weight;
+            }
+        } else {
+            score += specialty_weight * 0.8; // Some points for no specific requirement
+        }
+        max_score += specialty_weight;
+
+        // Availability match (25% weight)
+        let availability_weight = 0.25;
+        if !available_slots.is_empty() {
+            let availability_score = if let (Some(start), Some(end)) = 
+                (request.preferred_time_start, request.preferred_time_end) {
+                // Check if any slots match preferred time
+                let matching_slots = available_slots.iter()
+                    .filter(|slot| {
+                        let slot_time = slot.start_time.time();
+                        slot_time >= start && slot_time <= end
+                    })
+                    .count();
+                
+                if matching_slots > 0 {
+                    1.0
+                } else {
+                    0.5 // Has availability but not at preferred time
+                }
+            } else {
+                1.0 // Any availability is good if no preference
+            };
+            
+            score += availability_weight * availability_score;
+        }
+        max_score += availability_weight;
+
+        // Cost match (20% weight)
+        let cost_weight = 0.2;
+        if let (Some(doctor_fee), Some(max_fee)) = (doctor.consultation_fee, request.max_consultation_fee) {
+            if doctor_fee <= max_fee {
+                let cost_score = 1.0 - (doctor_fee / max_fee - 0.5).max(0.0);
+                score += cost_weight * cost_score;
+            }
+        } else {
+            score += cost_weight * 0.7; // Some points if no cost constraint
+        }
+        max_score += cost_weight;
+
+        // Doctor rating (15% weight)
+        let rating_weight = 0.15;
+        let rating_score = (doctor.rating / 5.0).min(1.0);
+        score += rating_weight * rating_score;
+        max_score += rating_weight;
+
+        // Experience (10% weight)
+        let experience_weight = 0.1;
+        if let Some(years_exp) = doctor.years_experience {
+            let experience_score = (years_exp as f32 / 20.0).min(1.0); // Max out at 20 years
+            score += experience_weight * experience_score;
+        }
+        max_score += experience_weight;
+
+        // Normalize score to 0-1 range
+        if max_score > 0.0 {
+            score / max_score
+        } else {
+            0.0
+        }
+    }
+
+    fn generate_match_reasons(
+        &self,
+        doctor: &Doctor,
+        request: &DoctorMatchingRequest,
+        available_slots: &[AvailableSlot],
+    ) -> Vec<String> {
+        let mut reasons = Vec::new();
+
+        // Specialty match
+        if let Some(ref required_specialty) = request.specialty_required {
+            if doctor.specialty.to_lowercase().contains(&required_specialty.to_lowercase()) {
+                reasons.push(format!("Specializes in {}", required_specialty));
+            }
+        }
+
+        // Availability
+        if !available_slots.is_empty() {
+            if let Some(preferred_date) = request.preferred_date {
+                reasons.push(format!("Available on {}", preferred_date));
+            } else {
+                reasons.push("Has available appointment slots".to_string());
+            }
+        }
+
+        // Cost
+        if let (Some(doctor_fee), Some(max_fee)) = (doctor.consultation_fee, request.max_consultation_fee) {
+            if doctor_fee <= max_fee {
+                reasons.push("Within budget".to_string());
+            }
+        }
+
+        // Rating
+        if doctor.rating >= 4.0 {
+            reasons.push(format!("Highly rated ({:.1}/5.0)", doctor.rating));
+        }
+
+        // Experience
+        if let Some(years_exp) = doctor.years_experience {
+            if years_exp >= 5 {
+                reasons.push(format!("{} years of experience", years_exp));
+            }
+        }
+
+        // Verification
+        if doctor.is_verified {
+            reasons.push("Verified doctor".to_string());
+        }
+
+        reasons
+    }
+
+    fn calculate_availability_score(&self, doctor: &Doctor, available_slots: &[AvailableSlot]) -> f32 {
+        let mut score = 0.6; // Base score for having availability
+
+        // More slots = higher score
+        score += (available_slots.len() as f32 * 0.05).min(0.2);
+
+        // Doctor rating contributes
+        score += (doctor.rating / 5.0) * 0.15;
+
+        // Experience contributes
+        if let Some(years_exp) = doctor.years_experience {
+            score += (years_exp as f32 / 20.0).min(0.05);
+        }
+
+        score.min(1.0)
+    }
+
+    async fn get_patient_info(&self, patient_id: &str, auth_token: &str) -> Result<Value> {
+        let path = format!("/rest/v1/patients?id=eq.{}", patient_id);
+        let result: Vec<Value> = self.supabase.request(
+            Method::GET,
+            &path,
+            Some(auth_token),
+            None,
+        ).await?;
+
+        if result.is_empty() {
+            return Err(anyhow!("Patient not found"));
+        }
+
+        Ok(result[0].clone())
+    }
+
+    async fn get_patient_appointment_history(
+        &self,
+        patient_id: &str,
+        auth_token: &str,
+    ) -> Result<Vec<Value>> {
+        let path = format!(
+            "/rest/v1/appointments?patient_id=eq.{}&order=created_at.desc&limit=10", 
+            patient_id
+        );
+        
+        let appointments: Vec<Value> = self.supabase.request(
+            Method::GET,
+            &path,
+            Some(auth_token),
+            None,
+        ).await.unwrap_or_default();
+
+        Ok(appointments)
+    }
+
+    fn calculate_average_consultation_fee(&self, appointments: &[Value]) -> Option<f64> {
+        let fees: Vec<f64> = appointments.iter()
+            .filter_map(|apt| apt["consultation_fee"].as_f64())
+            .collect();
+
+        if fees.is_empty() {
+            None
+        } else {
+            Some(fees.iter().sum::<f64>() / fees.len() as f64)
+        }
+    }
+
+    fn calculate_recommendation_score(
+        &self,
+        doctor: &Doctor,
+        appointment_history: &[Value],
+        _patient_info: &Value,
+    ) -> f32 {
+        let mut score = 0.0;
+
+        // Base score from doctor rating and experience
+        score += (doctor.rating / 5.0) * 0.4;
+        
+        if let Some(years_exp) = doctor.years_experience {
+            score += (years_exp as f32 / 20.0).min(0.2);
+        }
+
+        // Bonus if doctor has worked with similar patients (specialty matching)
+        if !appointment_history.is_empty() {
+            let specialty_matches = appointment_history.iter()
+                .filter(|apt| {
+                    apt.get("doctor_specialty")
+                        .and_then(|s| s.as_str())
+                        .map(|s| s == doctor.specialty)
+                        .unwrap_or(false)
+                })
+                .count();
+
+            if specialty_matches > 0 {
+                score += 0.2;
+            }
+        }
+
+        // Verification bonus
+        if doctor.is_verified {
+            score += 0.1;
+        }
+
+        // High consultation count indicates popularity
+        if doctor.total_consultations >= 50 {
+            score += 0.1;
+        }
+
+        score.min(1.0)
+    }
+
+    fn generate_recommendation_reasons(&self, appointment_history: &[Value]) -> Vec<String> {
+        let mut reasons = Vec::new();
+
+        if appointment_history.is_empty() {
+            reasons.push("Highly rated doctor".to_string());
+            reasons.push("Verified and experienced".to_string());
+        } else {
+            reasons.push("Based on your appointment history".to_string());
+            reasons.push("Matches your previous preferences".to_string());
+        }
+
+        reasons
+    }
+}
