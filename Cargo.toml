@@ -47,3 +47,4 @@ shared-models = { path = "libs/shared/models" }
 shared-utils = { path = "libs/shared/utils" }
 health-profile-cell = { path = "libs/health-profile-cell" }
 doctor-cell = { path = "libs/doctor-cell" }
+appointment-cell = { path = "libs/appointment-cell" }
