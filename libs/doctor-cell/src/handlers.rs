@@ -7,7 +7,7 @@ use axum::{
 use axum_extra::TypedHeader;
 use headers::{Authorization, authorization::Bearer};
 use serde_json::{json, Value};
-use serde::{Deserialize};
+use serde::{Deserialize, Serialize};
 use chrono::{NaiveDate, NaiveTime, DateTime, Utc};
 
 use shared_config::AppConfig;
@@ -25,8 +25,9 @@ use crate::services::{
 use crate::models::{
     CreateDoctorRequest, UpdateDoctorRequest, DoctorSearchFilters,
     CreateAvailabilityRequest, UpdateAvailabilityRequest, AvailabilityQueryRequest,
-    DoctorImageUpload, DoctorMatchingRequest, CreateSpecialtyRequest,
+    DoctorImageUpload, DoctorMatchingRequest,
     CreateAvailabilityOverrideRequest,
+    CreateSpecialtyRequest, // <-- Add this line to import the missing type
 };
 
 // Query parameters for different endpoints
@@ -687,7 +688,7 @@ pub async fn get_upcoming_appointments(
     State(state): State<Arc<AppConfig>>,
     TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
     Extension(user): Extension<User>,
-    Query(_query): Query<serde_json::Value>,
+    Query(query): Query<serde_json::Value>,
 ) -> Result<Json<Value>, AppError> {
     let token = auth.token();
     

@@ -21,15 +21,15 @@ pub fn appointment_routes(state: Arc<AppConfig>) -> Router {
         // Core appointment management
         .route("/", post(handlers::book_appointment))
         .route("/search", get(handlers::search_appointments))
-        .route("/:appointment_id", get(handlers::get_appointment))
-        .route("/:appointment_id", put(handlers::update_appointment))
-        .route("/:appointment_id/reschedule", patch(handlers::reschedule_appointment))
-        .route("/:appointment_id/cancel", post(handlers::cancel_appointment))
+        .route("/{appointment_id}", get(handlers::get_appointment))
+        .route("/{appointment_id}", put(handlers::update_appointment))
+        .route("/{appointment_id}/reschedule", patch(handlers::reschedule_appointment))
+        .route("/{appointment_id}/cancel", post(handlers::cancel_appointment))
         
         // Appointment listings
         .route("/upcoming", get(handlers::get_upcoming_appointments))
-        .route("/patients/:patient_id", get(handlers::get_patient_appointments))
-        .route("/doctors/:doctor_id", get(handlers::get_doctor_appointments))
+        .route("/patients/{patient_id}", get(handlers::get_patient_appointments))
+        .route("/doctors/{doctor_id}", get(handlers::get_doctor_appointments))
         
         // Utility endpoints
         .route("/conflicts/check", get(handlers::check_appointment_conflicts))

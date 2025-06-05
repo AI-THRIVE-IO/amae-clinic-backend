@@ -1,5 +1,5 @@
 use anyhow::{Result, anyhow};
-use chrono::{NaiveDate, NaiveTime, DateTime, Utc, Datelike, Weekday, Duration};
+use chrono::{DateTime, Utc, NaiveDate, NaiveTime, Datelike, Weekday, TimeZone, Duration};
 use reqwest::Method;
 use serde_json::{json, Value};
 use tracing::{debug, warn};
@@ -476,7 +476,7 @@ impl AvailabilityService {
             )?;
 
             // Check for overlap
-            if start_time < existing_end && end_time > existing_start {
+            if (start_time < existing_end && end_time > existing_start) {
                 return Err(anyhow!("Availability conflicts with existing schedule"));
             }
         }

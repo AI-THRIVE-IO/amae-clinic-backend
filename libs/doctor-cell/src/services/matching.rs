@@ -1,8 +1,9 @@
 use anyhow::{Result, anyhow};
-use chrono::{NaiveDate, NaiveTime};
+use chrono::{NaiveDate, NaiveTime, Utc};
 use reqwest::Method;
-use serde_json::{Value};
+use serde_json::{json, Value};
 use tracing::{debug, info};
+use uuid::Uuid;
 
 use shared_config::AppConfig;
 use shared_database::supabase::SupabaseClient;
@@ -90,11 +91,7 @@ impl DoctorMatchingService {
 
         info!("Found {} matching doctors with average score: {:.2}", 
               doctor_matches.len(),
-              if !doctor_matches.is_empty() {
-                  doctor_matches.iter().map(|m| m.match_score as f32).sum::<f32>() / doctor_matches.len() as f32
-              } else {
-                  0.0
-              });
+              doctor_matches.iter().map(|m| m.match_score).sum::<f32>() / doctor_matches.len() as f32);
 
         Ok(doctor_matches)
     }

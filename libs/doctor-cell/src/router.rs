@@ -16,28 +16,28 @@ pub fn doctor_routes(state: Arc<AppConfig>) -> Router {
     let public_routes = Router::new()
         // Public doctor search and viewing
         .route("/search", get(handlers::search_doctors))
-        .route("/:doctor_id", get(handlers::get_doctor))
-        .route("/:doctor_id/specialties", get(handlers::get_doctor_specialties))
-        .route("/:doctor_id/availability", get(handlers::get_doctor_availability))
-        .route("/:doctor_id/available-slots", get(handlers::get_available_slots));
+        .route("/{doctor_id}", get(handlers::get_doctor))
+        .route("/{doctor_id}/specialties", get(handlers::get_doctor_specialties))
+        .route("/{doctor_id}/availability", get(handlers::get_doctor_availability))
+        .route("/{doctor_id}/available-slots", get(handlers::get_available_slots));
 
     // Protected routes (authentication required)
     let protected_routes = Router::new()
         // Doctor profile management
         .route("/", post(handlers::create_doctor))
-        .route("/:doctor_id", put(handlers::update_doctor))
-        .route("/:doctor_id/verify", patch(handlers::verify_doctor))
-        .route("/:doctor_id/stats", get(handlers::get_doctor_stats))
-        .route("/:doctor_id/profile-image", post(handlers::upload_doctor_profile_image))
+        .route("/{doctor_id}", put(handlers::update_doctor))
+        .route("/{doctor_id}/verify", patch(handlers::verify_doctor))
+        .route("/{doctor_id}/stats", get(handlers::get_doctor_stats))
+        .route("/{doctor_id}/profile-image", post(handlers::upload_doctor_profile_image))
         
         // Doctor specialties
-        .route("/:doctor_id/specialties", post(handlers::add_doctor_specialty))
+        .route("/{doctor_id}/specialties", post(handlers::add_doctor_specialty))
         
         // Availability management
-        .route("/:doctor_id/availability", post(handlers::create_availability))
-        .route("/:doctor_id/availability/:availability_id", put(handlers::update_availability))
-        .route("/:doctor_id/availability/:availability_id", delete(handlers::delete_availability))
-        .route("/:doctor_id/availability-overrides", post(handlers::create_availability_override))
+        .route("/{doctor_id}/availability", post(handlers::create_availability))
+        .route("/{doctor_id}/availability/{availability_id}", put(handlers::update_availability))
+        .route("/{doctor_id}/availability/{availability_id}", delete(handlers::delete_availability))
+        .route("/{doctor_id}/availability-overrides", post(handlers::create_availability_override))
         
         // Doctor matching and recommendations
         .route("/matching/find", get(handlers::find_matching_doctors))
@@ -46,14 +46,14 @@ pub fn doctor_routes(state: Arc<AppConfig>) -> Router {
         
         // Appointment management
         .route("/appointments", post(handlers::book_appointment))
-        .route("/appointments/:appointment_id", get(handlers::get_appointment))
-        .route("/appointments/:appointment_id", patch(handlers::update_appointment))
-        .route("/appointments/:appointment_id/cancel", post(handlers::cancel_appointment))
+        .route("/appointments/{appointment_id}", get(handlers::get_appointment))
+        .route("/appointments/{appointment_id}", patch(handlers::update_appointment))
+        .route("/appointments/{appointment_id}/cancel", post(handlers::cancel_appointment))
         .route("/appointments/upcoming", get(handlers::get_upcoming_appointments))
         
         // Patient and doctor specific appointment views
-        .route("/patients/:patient_id/appointments", get(handlers::get_patient_appointments))
-        .route("/:doctor_id/appointments", get(handlers::get_doctor_appointments))
+        .route("/patients/{patient_id}/appointments", get(handlers::get_patient_appointments))
+        .route("/{doctor_id}/appointments", get(handlers::get_doctor_appointments))
         
         .layer(middleware::from_fn_with_state(state.clone(), auth_middleware));
 
