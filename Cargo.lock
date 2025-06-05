@@ -386,6 +386,7 @@ dependencies = [
  "shared-database",
  "shared-models",
  "shared-utils",
+ "thiserror",
  "tokio",
  "tower",
  "tower-http",

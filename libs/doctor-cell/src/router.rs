@@ -44,17 +44,6 @@ pub fn doctor_routes(state: Arc<AppConfig>) -> Router {
         .route("/matching/best", post(handlers::find_best_doctor))
         .route("/recommendations", get(handlers::get_recommended_doctors))
         
-        // Appointment management
-        .route("/appointments", post(handlers::book_appointment))
-        .route("/appointments/{appointment_id}", get(handlers::get_appointment))
-        .route("/appointments/{appointment_id}", patch(handlers::update_appointment))
-        .route("/appointments/{appointment_id}/cancel", post(handlers::cancel_appointment))
-        .route("/appointments/upcoming", get(handlers::get_upcoming_appointments))
-        
-        // Patient and doctor specific appointment views
-        .route("/patients/{patient_id}/appointments", get(handlers::get_patient_appointments))
-        .route("/{doctor_id}/appointments", get(handlers::get_doctor_appointments))
-        
         .layer(middleware::from_fn_with_state(state.clone(), auth_middleware));
 
     Router::new()

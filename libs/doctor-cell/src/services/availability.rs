@@ -12,7 +12,7 @@ use crate::models::{
     DoctorAvailability, DoctorAvailabilityOverride, AvailableSlot,
     CreateAvailabilityRequest, UpdateAvailabilityRequest,
     CreateAvailabilityOverrideRequest, AvailabilityQueryRequest,
-    DoctorAvailabilityResponse, Appointment
+    DoctorAvailabilityResponse,
 };
 
 pub struct AvailabilityService {
