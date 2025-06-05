@@ -1,9 +1,9 @@
 // libs/appointment-cell/src/services/booking.rs
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use chrono::{DateTime, Utc, Duration, NaiveTime};
 use reqwest::Method;
 use serde_json::{json, Value};
-use tracing::{debug, info, warn, error};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 use std::sync::Arc;
 
@@ -16,7 +16,7 @@ use crate::models::{
     Appointment, AppointmentStatus, AppointmentType, BookAppointmentRequest,
     UpdateAppointmentRequest, RescheduleAppointmentRequest, CancelAppointmentRequest,
     AppointmentSearchQuery, AppointmentStats, AppointmentError,
-    AppointmentValidationRules, CancelledBy, SmartBookingRequest, SmartBookingResponse,
+    AppointmentValidationRules, SmartBookingRequest, SmartBookingResponse,
     AlternativeSlot
 };
 use crate::services::conflict::ConflictDetectionService;
@@ -26,7 +26,7 @@ pub struct AppointmentBookingService {
     supabase: Arc<SupabaseClient>,
     conflict_service: ConflictDetectionService,
     lifecycle_service: AppointmentLifecycleService,
-    doctor_matching_service: DoctorMatchingService, // NEW: Integrated doctor matching
+    doctor_matching_service: DoctorMatchingService,
     validation_rules: AppointmentValidationRules,
 }
 
@@ -36,12 +36,12 @@ impl AppointmentBookingService {
 
         let conflict_service = ConflictDetectionService::new(Arc::clone(&supabase));
         let lifecycle_service = AppointmentLifecycleService::new();
-        let doctor_matching_service = DoctorMatchingService::new(config); // NEW
+        let doctor_matching_service = DoctorMatchingService::new(config);
 
         Self {
             conflict_service,
             lifecycle_service,
-            doctor_matching_service, // NEW
+            doctor_matching_service,
             supabase,
             validation_rules: AppointmentValidationRules::default(),
         }
@@ -66,16 +66,18 @@ impl AppointmentBookingService {
         let selected_slot = self.select_optimal_slot(&doctor_match, &request).await?;
         
         // **Step 4: Create Traditional Booking Request**
+        // FIX: Clone specialty_required to avoid partial move
+        let specialty_required_clone = request.specialty_required.clone();
         let booking_request = BookAppointmentRequest {
             patient_id: request.patient_id,
             doctor_id: Some(doctor_match.doctor.id),
             appointment_date: selected_slot.start_time,
-            appointment_type: request.appointment_type,
+            appointment_type: request.appointment_type.clone(),
             duration_minutes: request.duration_minutes,
-            timezone: request.timezone,
-            patient_notes: request.patient_notes,
+            timezone: request.timezone.clone(),
+            patient_notes: request.patient_notes.clone(),
             preferred_language: None,
-            specialty_required: request.specialty_required,
+            specialty_required: specialty_required_clone,
         };
         
         // **Step 5: Book the Appointment**
@@ -451,7 +453,7 @@ impl AppointmentBookingService {
             no_show_appointments,
             average_consultation_duration,
             appointment_type_breakdown,
-            doctor_continuity_rate, // NEW
+            doctor_continuity_rate,
         })
     }
 
@@ -521,11 +523,12 @@ impl AppointmentBookingService {
     }
 
     /// NEW: Select optimal slot from doctor's available slots
-    async fn select_optimal_slot(
+    /// FIX: Add explicit lifetime parameters to resolve lifetime conflict
+    async fn select_optimal_slot<'a>(
         &self,
-        doctor_match: &DoctorMatch,
+        doctor_match: &'a DoctorMatch,
         request: &SmartBookingRequest,
-    ) -> Result<&doctor_cell::models::AvailableSlot, AppointmentError> {
+    ) -> Result<&'a doctor_cell::models::AvailableSlot, AppointmentError> {
         if doctor_match.available_slots.is_empty() {
             return Err(AppointmentError::SlotNotAvailable);
         }
