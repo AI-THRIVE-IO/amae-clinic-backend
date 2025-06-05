@@ -31,7 +31,6 @@ use crate::models::{
 pub struct DoctorSearchQuery {
     pub specialty: Option<String>,
     pub min_experience: Option<i32>,
-    pub max_consultation_fee: Option<f64>,
     pub min_rating: Option<f32>,
     pub is_verified_only: Option<bool>,
     pub limit: Option<i32>,
@@ -52,7 +51,6 @@ pub struct MatchingQuery {
     pub preferred_time_start: Option<NaiveTime>,
     pub preferred_time_end: Option<NaiveTime>,
     pub specialty_required: Option<String>,
-    pub max_consultation_fee: Option<f64>,
     pub appointment_type: String,
     pub duration_minutes: i32,
     pub timezone: String,
@@ -139,7 +137,6 @@ pub async fn search_doctors(
         specialty: query.specialty,
         sub_specialty: None,
         min_experience: query.min_experience,
-        max_consultation_fee: query.max_consultation_fee,
         min_rating: query.min_rating,
         available_date: None,
         available_time_start: None,
@@ -338,7 +335,8 @@ pub async fn get_available_slots(
     Ok(Json(json!({
         "doctor_id": doctor_id,
         "date": query.date,
-        "available_slots": slots
+        "available_slots": slots,
+        "note": "These are theoretical availability slots. Verify actual availability with appointment-cell."
     })))
 }
 
@@ -432,7 +430,6 @@ pub async fn find_matching_doctors(
         preferred_time_start: query.preferred_time_start,
         preferred_time_end: query.preferred_time_end,
         specialty_required: query.specialty_required,
-        max_consultation_fee: query.max_consultation_fee,
         appointment_type: query.appointment_type,
         duration_minutes: query.duration_minutes,
         timezone: query.timezone,
@@ -443,7 +440,8 @@ pub async fn find_matching_doctors(
     
     Ok(Json(json!({
         "matches": matches,
-        "total": matches.len()
+        "total": matches.len(),
+        "note": "Theoretical matches based on doctor schedules. Verify actual availability with appointment-cell."
     })))
 }
 
@@ -467,7 +465,8 @@ pub async fn find_best_doctor(
         .map_err(|e| AppError::Internal(e.to_string()))?;
     
     Ok(Json(json!({
-        "best_match": best_match
+        "best_match": best_match,
+        "note": "Theoretical match based on doctor schedule. Verify actual availability with appointment-cell."
     })))
 }
 
@@ -490,6 +489,7 @@ pub async fn get_recommended_doctors(
     
     Ok(Json(json!({
         "recommendations": recommendations,
-        "total": recommendations.len()
+        "total": recommendations.len(),
+        "note": "Doctor recommendations based on professional credentials and ratings."
     })))
 }

@@ -63,7 +63,6 @@ impl DoctorService {
             "bio": request.bio,
             "license_number": request.license_number,
             "years_experience": request.years_experience,
-            "consultation_fee": request.consultation_fee,
             "timezone": request.timezone,
             "is_verified": false, // Requires admin verification
             "is_available": true,
@@ -149,9 +148,6 @@ impl DoctorService {
         if let Some(experience) = request.years_experience {
             update_data.insert("years_experience".to_string(), json!(experience));
         }
-        if let Some(fee) = request.consultation_fee {
-            update_data.insert("consultation_fee".to_string(), json!(fee));
-        }
         if let Some(timezone) = request.timezone {
             update_data.insert("timezone".to_string(), json!(timezone));
         }
@@ -199,9 +195,6 @@ impl DoctorService {
         }
         if let Some(min_exp) = filters.min_experience {
             query_parts.push(format!("years_experience=gte.{}", min_exp));
-        }
-        if let Some(max_fee) = filters.max_consultation_fee {
-            query_parts.push(format!("consultation_fee=lte.{}", max_fee));
         }
         if let Some(min_rating) = filters.min_rating {
             query_parts.push(format!("rating=gte.{}", min_rating));

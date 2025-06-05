@@ -12,7 +12,6 @@ pub struct Doctor {
     pub profile_image_url: Option<String>,
     pub license_number: Option<String>,
     pub years_experience: Option<i32>,
-    pub consultation_fee: Option<f64>,
     pub timezone: String,
     pub is_verified: bool,
     pub is_available: bool,
@@ -46,7 +45,6 @@ pub struct DoctorAvailability {
     pub appointment_type: String,
     pub buffer_minutes: i32,
     pub max_concurrent_appointments: i32,
-    pub price_per_session: Option<f64>,
     pub is_recurring: bool,
     pub specific_date: Option<NaiveDate>,
     pub is_available: bool,
@@ -70,7 +68,6 @@ pub struct AvailableSlot {
     pub end_time: DateTime<Utc>,
     pub duration_minutes: i32,
     pub appointment_type: String,
-    pub price: Option<f64>,
     pub timezone: String,
 }
 
@@ -79,7 +76,6 @@ pub struct DoctorSearchFilters {
     pub specialty: Option<String>,
     pub sub_specialty: Option<String>,
     pub min_experience: Option<i32>,
-    pub max_consultation_fee: Option<f64>,
     pub min_rating: Option<f32>,
     pub available_date: Option<NaiveDate>,
     pub available_time_start: Option<NaiveTime>,
@@ -97,7 +93,6 @@ pub struct CreateDoctorRequest {
     pub bio: Option<String>,
     pub license_number: Option<String>,
     pub years_experience: Option<i32>,
-    pub consultation_fee: Option<f64>,
     pub timezone: String,
 }
 
@@ -107,7 +102,6 @@ pub struct UpdateDoctorRequest {
     pub bio: Option<String>,
     pub specialty: Option<String>,
     pub years_experience: Option<i32>,
-    pub consultation_fee: Option<f64>,
     pub timezone: Option<String>,
     pub is_available: Option<bool>,
 }
@@ -122,7 +116,6 @@ pub struct CreateAvailabilityRequest {
     pub appointment_type: String,
     pub buffer_minutes: Option<i32>,
     pub max_concurrent_appointments: Option<i32>,
-    pub price_per_session: Option<f64>,
     pub is_recurring: Option<bool>,
     pub specific_date: Option<NaiveDate>,
 }
@@ -135,7 +128,6 @@ pub struct UpdateAvailabilityRequest {
     pub timezone: Option<String>,
     pub buffer_minutes: Option<i32>,
     pub max_concurrent_appointments: Option<i32>,
-    pub price_per_session: Option<f64>,
     pub is_available: Option<bool>,
 }
 
@@ -170,7 +162,6 @@ pub struct DoctorMatchingRequest {
     pub preferred_time_start: Option<NaiveTime>,
     pub preferred_time_end: Option<NaiveTime>,
     pub specialty_required: Option<String>,
-    pub max_consultation_fee: Option<f64>,
     pub appointment_type: String,
     pub duration_minutes: i32,
     pub timezone: String,
@@ -203,7 +194,6 @@ pub struct DoctorAvailabilityResponse {
     pub specialty: String,
     pub available_slots: Vec<AvailableSlot>,
     pub timezone: String,
-    pub consultation_fee: Option<f64>,
 }
 
 // Request/Response DTOs for profile image upload

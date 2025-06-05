@@ -68,7 +68,6 @@ impl AvailabilityService {
             "appointment_type": request.appointment_type,
             "buffer_minutes": request.buffer_minutes.unwrap_or(15),
             "max_concurrent_appointments": request.max_concurrent_appointments.unwrap_or(1),
-            "price_per_session": request.price_per_session,
             "is_recurring": request.is_recurring.unwrap_or(true),
             "specific_date": request.specific_date,
             "is_available": true,
@@ -149,9 +148,6 @@ impl AvailabilityService {
         }
         if let Some(max_concurrent) = request.max_concurrent_appointments {
             update_data.insert("max_concurrent_appointments".to_string(), json!(max_concurrent));
-        }
-        if let Some(price) = request.price_per_session {
-            update_data.insert("price_per_session".to_string(), json!(price));
         }
         if let Some(is_available) = request.is_available {
             update_data.insert("is_available".to_string(), json!(is_available));
@@ -375,7 +371,6 @@ impl AvailabilityService {
                 specialty: doctor_data["specialty"].as_str().unwrap_or("General").to_string(),
                 available_slots,
                 timezone: doctor_data["timezone"].as_str().unwrap_or("UTC").to_string(),
-                consultation_fee: doctor_data["consultation_fee"].as_f64(),
             });
         }
 
@@ -563,7 +558,6 @@ impl AvailabilityService {
                 end_time: slot_end,
                 duration_minutes,
                 appointment_type: schedule.appointment_type.clone(),
-                price: schedule.price_per_session,
                 timezone: timezone.to_string(),
             });
 

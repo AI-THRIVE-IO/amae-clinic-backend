@@ -48,7 +48,6 @@ impl DoctorMatchingService {
             specialty: request.specialty_required.clone(),
             sub_specialty: None,
             min_experience: None,
-            max_consultation_fee: request.max_consultation_fee,
             min_rating: Some(3.0), // Minimum acceptable rating
             available_date: request.preferred_date,
             available_time_start: request.preferred_time_start,
@@ -133,7 +132,6 @@ impl DoctorMatchingService {
             specialty: specialty_filter,
             sub_specialty: None,
             min_experience: None,
-            max_consultation_fee: None,
             min_rating: Some(3.0),
             available_date: Some(date),
             available_time_start: preferred_time_start,
@@ -215,11 +213,10 @@ impl DoctorMatchingService {
         let patient_info = self.get_patient_info(patient_id, auth_token).await?;
 
         // Build recommendation filters
-        let mut search_filters = DoctorSearchFilters {
+        let search_filters = DoctorSearchFilters {
             specialty: specialty.clone(),
             sub_specialty: None,
             min_experience: Some(2), // Prefer experienced doctors
-            max_consultation_fee: None,
             min_rating: Some(4.0), // Higher rating for recommendations
             available_date: None,
             available_time_start: None,
@@ -228,11 +225,6 @@ impl DoctorMatchingService {
             appointment_type: None,
             is_verified_only: Some(true),
         };
-
-        // Analyze patient history for preferences (if available)
-        if let Some(avg_fee) = self.calculate_average_consultation_fee(&patient_history) {
-            search_filters.max_consultation_fee = Some(avg_fee * 1.2); // Allow 20% higher than average
-        }
 
         let candidate_doctors = self.doctor_service.search_doctors(
             search_filters,
@@ -321,8 +313,8 @@ impl DoctorMatchingService {
         let mut score = 0.0;
         let mut max_score = 0.0;
 
-        // Specialty match (30% weight)
-        let specialty_weight = 0.3;
+        // Specialty match (40% weight - increased since no pricing)
+        let specialty_weight = 0.4;
         if let Some(ref required_specialty) = request.specialty_required {
             if doctor.specialty.to_lowercase().contains(&required_specialty.to_lowercase()) {
                 score += specialty_weight;
@@ -332,8 +324,8 @@ impl DoctorMatchingService {
         }
         max_score += specialty_weight;
 
-        // Theoretical availability match (25% weight)
-        let availability_weight = 0.25;
+        // Theoretical availability match (30% weight)
+        let availability_weight = 0.3;
         if !theoretical_slots.is_empty() {
             let availability_score = if let (Some(start), Some(end)) = 
                 (request.preferred_time_start, request.preferred_time_end) {
@@ -358,20 +350,8 @@ impl DoctorMatchingService {
         }
         max_score += availability_weight;
 
-        // Cost match (20% weight)
-        let cost_weight = 0.2;
-        if let (Some(doctor_fee), Some(max_fee)) = (doctor.consultation_fee, request.max_consultation_fee) {
-            if doctor_fee <= max_fee {
-                let cost_score = 1.0 - (doctor_fee / max_fee - 0.5).max(0.0);
-                score += cost_weight * cost_score;
-            }
-        } else {
-            score += cost_weight * 0.7; // Some points if no cost constraint
-        }
-        max_score += cost_weight;
-
-        // Doctor rating (15% weight)
-        let rating_weight = 0.15;
+        // Doctor rating (20% weight)
+        let rating_weight = 0.2;
         let rating_score = (doctor.rating / 5.0).min(1.0);
         score += rating_weight * rating_score as f64;
         max_score += rating_weight;
@@ -413,13 +393,6 @@ impl DoctorMatchingService {
                 reasons.push(format!("Theoretically available on {} (verify with appointment-cell)", preferred_date));
             } else {
                 reasons.push("Has theoretical availability slots (verify with appointment-cell)".to_string());
-            }
-        }
-
-        // Cost
-        if let (Some(doctor_fee), Some(max_fee)) = (doctor.consultation_fee, request.max_consultation_fee) {
-            if doctor_fee <= max_fee {
-                reasons.push("Within budget".to_string());
             }
         }
 
@@ -491,18 +464,6 @@ impl DoctorMatchingService {
         Ok(vec![])
     }
 
-    fn calculate_average_consultation_fee(&self, appointments: &[Value]) -> Option<f64> {
-        let fees: Vec<f64> = appointments.iter()
-            .filter_map(|apt| apt["consultation_fee"].as_f64())
-            .collect();
-
-        if fees.is_empty() {
-            None
-        } else {
-            Some(fees.iter().sum::<f64>() / fees.len() as f64)
-        }
-    }
-
     fn calculate_recommendation_score(
         &self,
         doctor: &Doctor,
@@ -544,6 +505,13 @@ impl DoctorMatchingService {
             score += 0.1;
         }
 
+        // Strong experience bonus (since no cost factors)
+        if let Some(years_exp) = doctor.years_experience {
+            if years_exp >= 10 {
+                score += 0.1;
+            }
+        }
+
         score.min(1.0)
     }
 
@@ -553,6 +521,7 @@ impl DoctorMatchingService {
         if appointment_history.is_empty() {
             reasons.push("Highly rated doctor".to_string());
             reasons.push("Verified and experienced".to_string());
+            reasons.push("Strong professional credentials".to_string());
         } else {
             reasons.push("Based on available patient history".to_string());
             reasons.push("Matches previous preferences".to_string());
