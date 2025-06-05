@@ -1,9 +1,8 @@
 // libs/doctor-cell/src/services/matching.rs
-use anyhow::{Result, anyhow};
 use chrono::{NaiveDate, NaiveTime};
 use reqwest::Method;
 use serde_json::{Value};
-use tracing::{debug, info, warn, error};
+use tracing::{debug, info, error};
 
 use shared_config::AppConfig;
 use shared_database::supabase::SupabaseClient;
@@ -72,6 +71,7 @@ impl DoctorMatchingService {
 
         if candidate_doctors.is_empty() {
             if let Some(ref specialty) = request.specialty_required {
+                error!("No {} doctors available at this time", specialty);
                 return Err(DoctorError::NotAvailable);
             }
         }
@@ -176,6 +176,9 @@ impl DoctorMatchingService {
         ).await.map_err(|e| DoctorError::ValidationError(e.to_string()))?;
 
         if doctors.is_empty() && specialty_filter.is_some() {
+            if let Some(ref specialty) = specialty_filter {
+                error!("No {} doctors available at this time", specialty);
+            }
             return Err(DoctorError::NotAvailable);
         }
 
@@ -232,8 +235,9 @@ impl DoctorMatchingService {
     ) -> Result<Vec<DoctorMatch>, DoctorError> {
         debug!("Getting recommended doctors for patient: {}", patient_id);
 
-        // **CRITICAL: Validate specialty if provided**
+        // **CRITICAL: Validate specialty if provided and use the variable**
         if let Some(ref specialty_name) = specialty {
+            debug!("Validating specialty requirement: {}", specialty_name);
             self.validate_specialty_availability(specialty_name, auth_token).await?;
         }
 
@@ -261,6 +265,9 @@ impl DoctorMatchingService {
         ).await.map_err(|e| DoctorError::ValidationError(e.to_string()))?;
 
         if candidate_doctors.is_empty() && specialty.is_some() {
+            if let Some(ref specialty_name) = specialty {
+                error!("No {} doctors available for recommendations", specialty_name);
+            }
             return Err(DoctorError::NotAvailable);
         }
 
