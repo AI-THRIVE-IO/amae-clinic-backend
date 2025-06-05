@@ -197,6 +197,7 @@ impl DoctorMatchingService {
     }
 
     /// Get recommended doctors based on patient history and preferences
+    /// NOTE: If the patient has already seen that doctor, they should be prioritized. || If they are available.
     pub async fn get_recommended_doctors(
         &self,
         patient_id: &str,
@@ -303,6 +304,9 @@ impl DoctorMatchingService {
         })
     }
 
+    // TODO's
+    // If theres no available specialty match, throw error (Not available)
+    // Prioritize previous consultations with the doctor
     fn calculate_match_score(
         &self,
         doctor: &Doctor,

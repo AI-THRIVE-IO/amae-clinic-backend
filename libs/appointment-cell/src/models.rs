@@ -61,10 +61,10 @@ impl fmt::Display for AppointmentStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum AppointmentType {
-    GeneralConsultation,  // Standard consultation
+    GeneralConsultation, // Standard consultation
     FollowUp,            // Follow-up appointment
     Prescription,        // Prescription renewal
-    MedicalCertificate,  // Sick note/medical certificate
+    MedicalCertificate,   // Sick note/medical certificate
     Urgent,              // Urgent consultation
     MentalHealth,        // Mental health consultation
     WomensHealth,        // Women's health specific
