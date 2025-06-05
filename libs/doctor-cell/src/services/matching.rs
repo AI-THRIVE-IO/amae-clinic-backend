@@ -1,9 +1,8 @@
 use anyhow::{Result, anyhow};
-use chrono::{NaiveDate, NaiveTime, Utc};
+use chrono::{NaiveDate, NaiveTime};
 use reqwest::Method;
-use serde_json::{json, Value};
+use serde_json::{Value};
 use tracing::{debug, info};
-use uuid::Uuid;
 
 use shared_config::AppConfig;
 use shared_database::supabase::SupabaseClient;
@@ -31,6 +30,8 @@ impl DoctorMatchingService {
     }
 
     /// Find best matching doctors for a patient's requirements
+    /// NOTE: This provides theoretical matches based on doctor availability schedules.
+    /// The appointment-cell should verify actual availability against booked appointments.
     pub async fn find_matching_doctors(
         &self,
         request: DoctorMatchingRequest,
@@ -91,7 +92,11 @@ impl DoctorMatchingService {
 
         info!("Found {} matching doctors with average score: {:.2}", 
               doctor_matches.len(),
-              doctor_matches.iter().map(|m| m.match_score).sum::<f32>() / doctor_matches.len() as f32);
+              if !doctor_matches.is_empty() {
+                  doctor_matches.iter().map(|m| m.match_score as f32).sum::<f32>() / doctor_matches.len() as f32
+              } else {
+                  0.0
+              });
 
         Ok(doctor_matches)
     }
@@ -106,8 +111,10 @@ impl DoctorMatchingService {
         Ok(matches.into_iter().next())
     }
 
-    /// Find doctors available at a specific time
-    pub async fn find_available_doctors(
+    /// Find doctors with theoretical availability at a specific time
+    /// NOTE: This returns doctors based on their availability schedules.
+    /// The appointment-cell should verify no conflicts with actual bookings.
+    pub async fn find_theoretically_available_doctors(
         &self,
         date: NaiveDate,
         preferred_time_start: Option<NaiveTime>,
@@ -118,7 +125,7 @@ impl DoctorMatchingService {
         specialty_filter: Option<String>,
         auth_token: &str,
     ) -> Result<Vec<DoctorMatch>> {
-        debug!("Finding available doctors for {} at time range {:?}-{:?}", 
+        debug!("Finding theoretically available doctors for {} at time range {:?}-{:?}", 
                date, preferred_time_start, preferred_time_end);
 
         // Get all active, verified doctors
@@ -146,7 +153,7 @@ impl DoctorMatchingService {
         let mut available_doctors = Vec::new();
 
         for doctor in doctors {
-            // Get available slots for this doctor
+            // Get theoretical available slots for this doctor
             let availability_query = AvailabilityQueryRequest {
                 date,
                 timezone: Some(timezone.clone()),
@@ -154,7 +161,7 @@ impl DoctorMatchingService {
                 duration_minutes: Some(duration_minutes),
             };
 
-            let available_slots = self.availability_service.get_available_slots(
+            let theoretical_slots = self.availability_service.get_available_slots(
                 &doctor.id.to_string(),
                 availability_query,
                 auth_token,
@@ -162,14 +169,14 @@ impl DoctorMatchingService {
 
             // Filter slots by preferred time if specified
             let filtered_slots = if let (Some(start), Some(end)) = (preferred_time_start, preferred_time_end) {
-                available_slots.into_iter()
+                theoretical_slots.into_iter()
                     .filter(|slot| {
                         let slot_time = slot.start_time.time();
                         slot_time >= start && slot_time <= end
                     })
                     .collect()
             } else {
-                available_slots
+                theoretical_slots
             };
 
             if !filtered_slots.is_empty() {
@@ -180,7 +187,7 @@ impl DoctorMatchingService {
                     doctor,
                     available_slots: filtered_slots,
                     match_score,
-                    match_reasons: vec!["Available at requested time".to_string()],
+                    match_reasons: vec!["Theoretically available at requested time (verify with appointment-cell)".to_string()],
                 });
             }
         }
@@ -201,8 +208,8 @@ impl DoctorMatchingService {
     ) -> Result<Vec<DoctorMatch>> {
         debug!("Getting recommended doctors for patient: {}", patient_id);
 
-        // Get patient's previous appointments to understand preferences
-        let patient_history = self.get_patient_appointment_history(patient_id, auth_token).await?;
+        // Get patient's appointment history (if accessible)
+        let patient_history = self.get_patient_basic_history(patient_id, auth_token).await.unwrap_or_default();
         
         // Get patient info
         let patient_info = self.get_patient_info(patient_id, auth_token).await?;
@@ -222,7 +229,7 @@ impl DoctorMatchingService {
             is_verified_only: Some(true),
         };
 
-        // Analyze patient history for preferences
+        // Analyze patient history for preferences (if available)
         if let Some(avg_fee) = self.calculate_average_consultation_fee(&patient_history) {
             search_filters.max_consultation_fee = Some(avg_fee * 1.2); // Allow 20% higher than average
         }
@@ -246,7 +253,7 @@ impl DoctorMatchingService {
             if recommendation_score > 0.5 { // Only include good recommendations
                 recommendations.push(DoctorMatch {
                     doctor,
-                    available_slots: vec![], // Will be filled when needed
+                    available_slots: vec![], // Will be filled when needed by appointment-cell
                     match_score: recommendation_score,
                     match_reasons: self.generate_recommendation_reasons(&patient_history),
                 });
@@ -272,8 +279,8 @@ impl DoctorMatchingService {
         patient_info: &Value,
         auth_token: &str,
     ) -> Result<DoctorMatch> {
-        // Get available slots for the doctor
-        let available_slots = if let Some(date) = request.preferred_date {
+        // Get theoretical available slots for the doctor
+        let theoretical_slots = if let Some(date) = request.preferred_date {
             let availability_query = AvailabilityQueryRequest {
                 date,
                 timezone: Some(request.timezone.clone()),
@@ -291,14 +298,14 @@ impl DoctorMatchingService {
         };
 
         // Calculate match score
-        let match_score = self.calculate_match_score(doctor, request, patient_info, &available_slots);
+        let match_score = self.calculate_match_score(doctor, request, patient_info, &theoretical_slots);
         
         // Generate match reasons
-        let match_reasons = self.generate_match_reasons(doctor, request, &available_slots);
+        let match_reasons = self.generate_match_reasons(doctor, request, &theoretical_slots);
 
         Ok(DoctorMatch {
             doctor: doctor.clone(),
-            available_slots,
+            available_slots: theoretical_slots,
             match_score,
             match_reasons,
         })
@@ -309,7 +316,7 @@ impl DoctorMatchingService {
         doctor: &Doctor,
         request: &DoctorMatchingRequest,
         _patient_info: &Value,
-        available_slots: &[AvailableSlot],
+        theoretical_slots: &[AvailableSlot],
     ) -> f32 {
         let mut score = 0.0;
         let mut max_score = 0.0;
@@ -325,13 +332,13 @@ impl DoctorMatchingService {
         }
         max_score += specialty_weight;
 
-        // Availability match (25% weight)
+        // Theoretical availability match (25% weight)
         let availability_weight = 0.25;
-        if !available_slots.is_empty() {
+        if !theoretical_slots.is_empty() {
             let availability_score = if let (Some(start), Some(end)) = 
                 (request.preferred_time_start, request.preferred_time_end) {
                 // Check if any slots match preferred time
-                let matching_slots = available_slots.iter()
+                let matching_slots = theoretical_slots.iter()
                     .filter(|slot| {
                         let slot_time = slot.start_time.time();
                         slot_time >= start && slot_time <= end
@@ -341,10 +348,10 @@ impl DoctorMatchingService {
                 if matching_slots > 0 {
                     1.0
                 } else {
-                    0.5 // Has availability but not at preferred time
+                    0.5 // Has theoretical availability but not at preferred time
                 }
             } else {
-                1.0 // Any availability is good if no preference
+                1.0 // Any theoretical availability is good if no preference
             };
             
             score += availability_weight * availability_score;
@@ -389,7 +396,7 @@ impl DoctorMatchingService {
         &self,
         doctor: &Doctor,
         request: &DoctorMatchingRequest,
-        available_slots: &[AvailableSlot],
+        theoretical_slots: &[AvailableSlot],
     ) -> Vec<String> {
         let mut reasons = Vec::new();
 
@@ -400,12 +407,12 @@ impl DoctorMatchingService {
             }
         }
 
-        // Availability
-        if !available_slots.is_empty() {
+        // Theoretical availability
+        if !theoretical_slots.is_empty() {
             if let Some(preferred_date) = request.preferred_date {
-                reasons.push(format!("Available on {}", preferred_date));
+                reasons.push(format!("Theoretically available on {} (verify with appointment-cell)", preferred_date));
             } else {
-                reasons.push("Has available appointment slots".to_string());
+                reasons.push("Has theoretical availability slots (verify with appointment-cell)".to_string());
             }
         }
 
@@ -436,11 +443,11 @@ impl DoctorMatchingService {
         reasons
     }
 
-    fn calculate_availability_score(&self, doctor: &Doctor, available_slots: &[AvailableSlot]) -> f32 {
-        let mut score = 0.6; // Base score for having availability
+    fn calculate_availability_score(&self, doctor: &Doctor, theoretical_slots: &[AvailableSlot]) -> f32 {
+        let mut score = 0.6; // Base score for having theoretical availability
 
         // More slots = higher score
-        score += (available_slots.len() as f32 * 0.05).min(0.2);
+        score += (theoretical_slots.len() as f32 * 0.05).min(0.2);
 
         // Doctor rating contributes
         score += (doctor.rating / 5.0) * 0.15;
@@ -469,24 +476,19 @@ impl DoctorMatchingService {
         Ok(result[0].clone())
     }
 
-    async fn get_patient_appointment_history(
+    async fn get_patient_basic_history(
         &self,
         patient_id: &str,
         auth_token: &str,
     ) -> Result<Vec<Value>> {
-        let path = format!(
-            "/rest/v1/appointments?patient_id=eq.{}&order=created_at.desc&limit=10", 
-            patient_id
-        );
+        // This is a simplified version that doesn't rely on appointment-cell data
+        // In a real implementation, this might call the appointment-cell API
+        // or use a shared patient history service
         
-        let appointments: Vec<Value> = self.supabase.request(
-            Method::GET,
-            &path,
-            Some(auth_token),
-            None,
-        ).await.unwrap_or_default();
-
-        Ok(appointments)
+        debug!("Getting basic patient history for: {}", patient_id);
+        
+        // For now, return empty - the appointment-cell would provide this data
+        Ok(vec![])
     }
 
     fn calculate_average_consultation_fee(&self, appointments: &[Value]) -> Option<f64> {
@@ -516,7 +518,7 @@ impl DoctorMatchingService {
             score += (years_exp as f32 / 20.0).min(0.2);
         }
 
-        // Bonus if doctor has worked with similar patients (specialty matching)
+        // Bonus if doctor has worked with similar patients (if history available)
         if !appointment_history.is_empty() {
             let specialty_matches = appointment_history.iter()
                 .filter(|apt| {
@@ -552,8 +554,8 @@ impl DoctorMatchingService {
             reasons.push("Highly rated doctor".to_string());
             reasons.push("Verified and experienced".to_string());
         } else {
-            reasons.push("Based on your appointment history".to_string());
-            reasons.push("Matches your previous preferences".to_string());
+            reasons.push("Based on available patient history".to_string());
+            reasons.push("Matches previous preferences".to_string());
         }
 
         reasons

@@ -1,5 +1,5 @@
 use anyhow::{Result, anyhow};
-use chrono::{DateTime, Utc, NaiveDate, NaiveTime, Datelike, Weekday, TimeZone, Duration};
+use chrono::{NaiveDate, NaiveTime, DateTime, Utc, Datelike, Weekday, Duration};
 use reqwest::Method;
 use serde_json::{json, Value};
 use tracing::{debug, warn};
@@ -12,7 +12,7 @@ use crate::models::{
     DoctorAvailability, DoctorAvailabilityOverride, AvailableSlot,
     CreateAvailabilityRequest, UpdateAvailabilityRequest,
     CreateAvailabilityOverrideRequest, AvailabilityQueryRequest,
-    DoctorAvailabilityResponse,
+    DoctorAvailabilityResponse
 };
 
 pub struct AvailabilityService {
@@ -203,13 +203,15 @@ impl AvailabilityService {
     }
 
     /// Calculate available slots for a specific date
+    /// NOTE: This method calculates theoretical availability based on doctor's schedule.
+    /// The appointment-cell should call this and then filter out actually booked slots.
     pub async fn get_available_slots(
         &self,
         doctor_id: &str,
         query: AvailabilityQueryRequest,
         auth_token: &str,
     ) -> Result<Vec<AvailableSlot>> {
-        debug!("Calculating available slots for doctor {} on {}", doctor_id, query.date);
+        debug!("Calculating theoretical available slots for doctor {} on {}", doctor_id, query.date);
 
         // Get day of week (0 = Sunday, 1 = Monday, etc.)
         let weekday = query.date.weekday();
@@ -247,25 +249,17 @@ impl AvailabilityService {
             }
         }
 
-        // Get existing appointments for this date
-        let existing_appointments = self.get_appointments_for_date(
-            doctor_id, 
-            query.date, 
-            auth_token
-        ).await?;
-
         let mut available_slots = Vec::new();
 
-        // Calculate slots for each availability schedule
+        // Calculate theoretical slots for each availability schedule
         for schedule in availability_schedules {
             if !schedule.is_available {
                 continue;
             }
 
-            let slots = self.calculate_slots_for_schedule(
+            let slots = self.calculate_theoretical_slots_for_schedule(
                 &schedule,
                 query.date,
-                &existing_appointments,
                 query.duration_minutes,
                 query.timezone.as_deref().unwrap_or(schedule.timezone.as_str()),
             ).await?;
@@ -279,7 +273,7 @@ impl AvailabilityService {
         // Remove duplicates and overlapping slots
         available_slots = self.remove_overlapping_slots(available_slots);
 
-        debug!("Found {} available slots", available_slots.len());
+        debug!("Found {} theoretical available slots", available_slots.len());
         Ok(available_slots)
     }
 
@@ -365,7 +359,7 @@ impl AvailabilityService {
 
             let doctor_data = &doctor_result[0];
             
-            // Get available slots
+            // Get theoretical available slots
             let query = AvailabilityQueryRequest {
                 date,
                 timezone: Some(doctor_data["timezone"].as_str().unwrap_or("UTC").to_string()),
@@ -395,10 +389,6 @@ impl AvailabilityService {
         auth_token: &str,
     ) -> Result<()> {
         debug!("Deleting availability: {}", availability_id);
-
-        // Check if there are any future appointments using this availability
-        // This would require more complex logic to determine which availability slot an appointment uses
-        // For now, we'll just delete it
 
         let path = format!("/rest/v1/appointment_availabilities?id=eq.{}", availability_id);
         let _: Vec<Value> = self.supabase.request(
@@ -476,7 +466,7 @@ impl AvailabilityService {
             )?;
 
             // Check for overlap
-            if (start_time < existing_end && end_time > existing_start) {
+            if start_time < existing_end && end_time > existing_start {
                 return Err(anyhow!("Availability conflicts with existing schedule"));
             }
         }
@@ -545,41 +535,12 @@ impl AvailabilityService {
         Ok(overrides)
     }
 
-    async fn get_appointments_for_date(
-        &self,
-        doctor_id: &str,
-        date: NaiveDate,
-        auth_token: &str,
-    ) -> Result<Vec<Appointment>> {
-        let start_of_day = date.and_hms_opt(0, 0, 0).unwrap().and_utc();
-        let end_of_day = date.and_hms_opt(23, 59, 59).unwrap().and_utc();
-
-        let path = format!(
-            "/rest/v1/appointments?doctor_id=eq.{}&scheduled_start_time=gte.{}&scheduled_start_time=lte.{}&status=in.(confirmed,in_progress)&order=scheduled_start_time.asc",
-            doctor_id,
-            start_of_day.to_rfc3339(),
-            end_of_day.to_rfc3339()
-        );
-
-        let result: Vec<Value> = self.supabase.request(
-            Method::GET,
-            &path,
-            Some(auth_token),
-            None,
-        ).await?;
-
-        let appointments: Vec<Appointment> = result.into_iter()
-            .map(|apt| serde_json::from_value(apt))
-            .collect::<std::result::Result<Vec<Appointment>, _>>()?;
-
-        Ok(appointments)
-    }
-
-    async fn calculate_slots_for_schedule(
+    /// Calculate theoretical slots based on doctor's availability schedule
+    /// This doesn't check for actual appointments - that's the appointment-cell's responsibility
+    async fn calculate_theoretical_slots_for_schedule(
         &self,
         schedule: &DoctorAvailability,
         date: NaiveDate,
-        existing_appointments: &[Appointment],
         requested_duration: Option<i32>,
         timezone: &str,
     ) -> Result<Vec<AvailableSlot>> {
@@ -597,25 +558,14 @@ impl AvailabilityService {
         while current_time + Duration::minutes(duration_minutes as i64) <= end_datetime {
             let slot_end = current_time + Duration::minutes(duration_minutes as i64);
 
-            // Check if this slot conflicts with existing appointments
-            let has_conflict = existing_appointments.iter().any(|apt| {
-                let apt_start = apt.scheduled_start_time;
-                let apt_end = apt.scheduled_end_time;
-                
-                // Check for overlap
-                current_time < apt_end && slot_end > apt_start
+            slots.push(AvailableSlot {
+                start_time: current_time,
+                end_time: slot_end,
+                duration_minutes,
+                appointment_type: schedule.appointment_type.clone(),
+                price: schedule.price_per_session,
+                timezone: timezone.to_string(),
             });
-
-            if !has_conflict {
-                slots.push(AvailableSlot {
-                    start_time: current_time,
-                    end_time: slot_end,
-                    duration_minutes,
-                    appointment_type: schedule.appointment_type.clone(),
-                    price: schedule.price_per_session,
-                    timezone: timezone.to_string(),
-                });
-            }
 
             current_time += Duration::minutes(total_slot_duration as i64);
         }

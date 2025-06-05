@@ -7,8 +7,8 @@ use axum::{
 use axum_extra::TypedHeader;
 use headers::{Authorization, authorization::Bearer};
 use serde_json::{json, Value};
-use serde::{Deserialize, Serialize};
-use chrono::{NaiveDate, NaiveTime, DateTime, Utc};
+use serde::{Deserialize};
+use chrono::{NaiveDate, NaiveTime};
 
 use shared_config::AppConfig;
 use shared_models::auth::User;
@@ -22,9 +22,8 @@ use crate::services::{
 use crate::models::{
     CreateDoctorRequest, UpdateDoctorRequest, DoctorSearchFilters,
     CreateAvailabilityRequest, UpdateAvailabilityRequest, AvailabilityQueryRequest,
-    DoctorImageUpload, DoctorMatchingRequest,
+    DoctorImageUpload, DoctorMatchingRequest, CreateSpecialtyRequest,
     CreateAvailabilityOverrideRequest,
-    CreateSpecialtyRequest, // <-- Add this line to import the missing type
 };
 
 // Query parameters for different endpoints
@@ -45,14 +44,6 @@ pub struct AvailabilityQuery {
     pub timezone: Option<String>,
     pub appointment_type: Option<String>,
     pub duration_minutes: Option<i32>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct AppointmentQuery {
-    pub status: Option<String>,
-    pub from_date: Option<DateTime<Utc>>,
-    pub to_date: Option<DateTime<Utc>>,
-    pub limit: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -283,7 +274,7 @@ pub async fn verify_doctor(
 }
 
 // ==============================================================================
-// AVAILABILITY HANDLERS
+// AVAILABILITY HANDLERS (Doctor Configuration)
 // ==============================================================================
 
 #[axum::debug_handler]
@@ -502,4 +493,3 @@ pub async fn get_recommended_doctors(
         "total": recommendations.len()
     })))
 }
-// ==============================================================================

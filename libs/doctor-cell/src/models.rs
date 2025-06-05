@@ -12,7 +12,7 @@ pub struct Doctor {
     pub profile_image_url: Option<String>,
     pub license_number: Option<String>,
     pub years_experience: Option<i32>,
-    pub consultation_fee: Option<f64>, // Will be removed when global pricing implemented
+    pub consultation_fee: Option<f64>,
     pub timezone: String,
     pub is_verified: bool,
     pub is_available: bool,
@@ -46,7 +46,7 @@ pub struct DoctorAvailability {
     pub appointment_type: String,
     pub buffer_minutes: i32,
     pub max_concurrent_appointments: i32,
-    pub price_per_session: Option<f64>, // Will be removed when global pricing implemented
+    pub price_per_session: Option<f64>,
     pub is_recurring: bool,
     pub specific_date: Option<NaiveDate>,
     pub is_available: bool,
@@ -213,24 +213,27 @@ pub struct DoctorImageUpload {
 }
 
 // Error types specific to doctor operations
-#[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DoctorError {
-    #[error("Doctor not found")]
     NotFound,
-    
-    #[error("Doctor not available")]
     NotAvailable,
-    
-    #[error("Invalid timezone")]
     InvalidTimezone,
-    
-    #[error("Invalid time slot")]
     InvalidTimeSlot,
-    
-    #[error("Unauthorized access to doctor data")]
     UnauthorizedAccess,
-    
-    #[error("Validation error: {0}")]
     ValidationError(String),
 }
 
+impl std::fmt::Display for DoctorError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DoctorError::NotFound => write!(f, "Doctor not found"),
+            DoctorError::NotAvailable => write!(f, "Doctor is not available"),
+            DoctorError::InvalidTimezone => write!(f, "Invalid timezone specified"),
+            DoctorError::InvalidTimeSlot => write!(f, "Invalid time slot"),
+            DoctorError::UnauthorizedAccess => write!(f, "Unauthorized access to doctor data"),
+            DoctorError::ValidationError(msg) => write!(f, "Validation error: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for DoctorError {}
