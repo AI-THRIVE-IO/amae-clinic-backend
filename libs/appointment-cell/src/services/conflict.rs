@@ -210,7 +210,6 @@ impl ConflictDetectionService {
                         end_time: slot_end,
                         doctor_id,
                         appointment_type: AppointmentType::GeneralConsultation, // Default
-                        price: 29.0, // Default promotional price
                     }));
                 }
             }
@@ -348,7 +347,6 @@ impl ConflictDetectionService {
                         end_time: slot_end,
                         doctor_id,
                         appointment_type: AppointmentType::GeneralConsultation,
-                        price: 29.0,
                     });
                 }
             }

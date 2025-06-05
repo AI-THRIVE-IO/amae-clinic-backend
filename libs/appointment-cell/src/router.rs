@@ -12,11 +12,7 @@ use shared_utils::extractor::auth_middleware;
 use crate::handlers;
 
 pub fn appointment_routes(state: Arc<AppConfig>) -> Router {
-    // Public routes (minimal - most appointment operations require auth)
-    let public_routes = Router::new()
-        .route("/pricing", get(handlers::get_pricing_info));
-
-    // Protected routes (require authentication)
+    // All appointment operations require authentication
     let protected_routes = Router::new()
         // Core appointment management
         .route("/", post(handlers::book_appointment))
@@ -38,7 +34,6 @@ pub fn appointment_routes(state: Arc<AppConfig>) -> Router {
         .layer(middleware::from_fn_with_state(state.clone(), auth_middleware));
 
     Router::new()
-        .merge(public_routes)
         .merge(protected_routes)
         .with_state(state)
 }

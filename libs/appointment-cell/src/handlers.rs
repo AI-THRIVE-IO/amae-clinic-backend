@@ -478,31 +478,3 @@ pub async fn get_appointment_stats(
     
     Ok(Json(json!(stats)))
 }
-
-#[axum::debug_handler]
-pub async fn get_pricing_info(
-    State(_state): State<Arc<AppConfig>>,
-    TypedHeader(_auth): TypedHeader<Authorization<Bearer>>,
-    Extension(_user): Extension<User>,
-) -> Result<Json<Value>, AppError> {
-    // Use Arc for SupabaseClient to match PricingService::new signature
-    let dummy_config = shared_config::AppConfig {
-        supabase_url: String::new(),
-        supabase_anon_key: String::new(),
-        supabase_jwt_secret: String::new(),
-    };
-    let supabase = Arc::new(shared_database::supabase::SupabaseClient::new(&dummy_config));
-    let pricing_service = crate::services::pricing::PricingService::new(supabase);
-
-    let pricing_info = pricing_service.get_pricing_info();
-
-    Ok(Json(json!({
-        "pricing": pricing_info,
-        "currency": "EUR",
-        "includes_by_default": {
-            "prescription": true,
-            "medical_certificate": true,
-            "consultation_report": true
-        }
-    })))
-}

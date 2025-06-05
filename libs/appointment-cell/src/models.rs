@@ -16,7 +16,6 @@ pub struct Appointment {
     pub status: AppointmentStatus,
     pub appointment_type: AppointmentType,
     pub duration_minutes: i32,
-    pub consultation_fee: f64,  // Always set - no optional pricing
     pub timezone: String,
     pub scheduled_start_time: DateTime<Utc>,
     pub scheduled_end_time: DateTime<Utc>,
@@ -37,7 +36,7 @@ pub struct Appointment {
 #[serde(rename_all = "snake_case")]
 pub enum AppointmentStatus {
     Pending,       // Just booked, awaiting confirmation
-    Confirmed,     // Doctor confirmed, payment processed
+    Confirmed,     // Doctor confirmed
     InProgress,    // Consultation started
     Completed,     // Consultation finished
     Cancelled,     // Cancelled by patient or doctor
@@ -59,7 +58,7 @@ impl fmt::Display for AppointmentStatus {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq,Eq, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum AppointmentType {
     GeneralConsultation,  // Standard consultation
@@ -82,87 +81,6 @@ impl fmt::Display for AppointmentType {
             AppointmentType::MentalHealth => write!(f, "mental_health"),
             AppointmentType::WomensHealth => write!(f, "womens_health"),
         }
-    }
-}
-
-// ==============================================================================
-// PRICING MODELS
-// ==============================================================================
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AppointmentPricing {
-    pub appointment_type: AppointmentType,
-    pub base_price: f64,
-    pub promotional_price: Option<f64>,
-    pub includes_prescription: bool,
-    pub includes_medical_certificate: bool,
-    pub includes_report: bool,
-}
-
-impl AppointmentPricing {
-    pub fn get_standard_pricing() -> Vec<Self> {
-        vec![
-            Self {
-                appointment_type: AppointmentType::GeneralConsultation,
-                base_price: 39.0,
-                promotional_price: Some(29.0), // Initial promotional pricing
-                includes_prescription: true,
-                includes_medical_certificate: true,
-                includes_report: true,
-            },
-            Self {
-                appointment_type: AppointmentType::FollowUp,
-                base_price: 29.0,
-                promotional_price: None,
-                includes_prescription: true,
-                includes_medical_certificate: false,
-                includes_report: true,
-            },
-            Self {
-                appointment_type: AppointmentType::Prescription,
-                base_price: 19.0,
-                promotional_price: None,
-                includes_prescription: true,
-                includes_medical_certificate: false,
-                includes_report: false,
-            },
-            Self {
-                appointment_type: AppointmentType::MedicalCertificate,
-                base_price: 25.0,
-                promotional_price: None,
-                includes_prescription: false,
-                includes_medical_certificate: true,
-                includes_report: false,
-            },
-            Self {
-                appointment_type: AppointmentType::Urgent,
-                base_price: 59.0,
-                promotional_price: None,
-                includes_prescription: true,
-                includes_medical_certificate: true,
-                includes_report: true,
-            },
-            Self {
-                appointment_type: AppointmentType::MentalHealth,
-                base_price: 49.0,
-                promotional_price: None,
-                includes_prescription: true,
-                includes_medical_certificate: true,
-                includes_report: true,
-            },
-            Self {
-                appointment_type: AppointmentType::WomensHealth,
-                base_price: 39.0,
-                promotional_price: Some(29.0),
-                includes_prescription: true,
-                includes_medical_certificate: true,
-                includes_report: true,
-            },
-        ]
-    }
-
-    pub fn get_effective_price(&self) -> f64 {
-        self.promotional_price.unwrap_or(self.base_price)
     }
 }
 
@@ -249,7 +167,6 @@ pub struct SuggestedSlot {
     pub end_time: DateTime<Utc>,
     pub doctor_id: Uuid,
     pub appointment_type: AppointmentType,
-    pub price: f64,
 }
 
 // ==============================================================================
@@ -265,7 +182,6 @@ pub struct AppointmentSummary {
     pub status: AppointmentStatus,
     pub appointment_type: AppointmentType,
     pub duration_minutes: i32,
-    pub consultation_fee: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -274,7 +190,6 @@ pub struct AppointmentStats {
     pub completed_appointments: i32,
     pub cancelled_appointments: i32,
     pub no_show_appointments: i32,
-    pub total_revenue: f64,
     pub average_consultation_duration: i32,
     pub appointment_type_breakdown: Vec<(AppointmentType, i32)>,
 }
@@ -311,9 +226,6 @@ pub enum AppointmentError {
     
     #[error("Unauthorized access to appointment")]
     Unauthorized,
-    
-    #[error("Payment required before confirmation")]
-    PaymentRequired,
     
     #[error("Validation error: {0}")]
     ValidationError(String),

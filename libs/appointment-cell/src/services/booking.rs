@@ -17,13 +17,11 @@ use crate::models::{
     AppointmentSearchQuery, AppointmentSummary, AppointmentStats, AppointmentError,
     AppointmentValidationRules, CancelledBy
 };
-use crate::services::pricing::PricingService;
 use crate::services::conflict::ConflictDetectionService;
 use crate::services::lifecycle::AppointmentLifecycleService;
 
 pub struct AppointmentBookingService {
     supabase: Arc<SupabaseClient>,
-    pricing_service: PricingService,
     conflict_service: ConflictDetectionService,
     lifecycle_service: AppointmentLifecycleService,
     availability_service: AvailabilityService,
@@ -34,13 +32,11 @@ impl AppointmentBookingService {
     pub fn new(config: &AppConfig) -> Self {
         let supabase = Arc::new(SupabaseClient::new(config));
 
-        let pricing_service = PricingService::new(Arc::clone(&supabase));
         let conflict_service = ConflictDetectionService::new(Arc::clone(&supabase));
         let lifecycle_service = AppointmentLifecycleService::new(Arc::clone(&supabase));
         let availability_service = AvailabilityService::new(config);
 
         Self {
-            pricing_service,
             conflict_service,
             lifecycle_service,
             availability_service,
@@ -63,7 +59,7 @@ impl AppointmentBookingService {
         
         // **Step 2: Verify Patient and Doctor Exist**
         self.verify_patient_exists(&request.patient_id, auth_token).await?;
-        let doctor_info = self.verify_doctor_available(&request.doctor_id, auth_token).await?;
+        let _doctor_info = self.verify_doctor_available(&request.doctor_id, auth_token).await?;
         
         // **Step 3: Check Doctor Availability for Specific Slot**
         self.verify_slot_available(&request, auth_token).await?;
@@ -84,20 +80,13 @@ impl AppointmentBookingService {
             return Err(AppointmentError::ConflictDetected);
         }
 
-        // **Step 5: Calculate Pricing**
-        let consultation_fee = self.pricing_service.calculate_price(
-            &request.appointment_type,
-            request.duration_minutes,
-        ).await?;
-
-        // **Step 6: Create Appointment Record**
+        // **Step 5: Create Appointment Record**
         let appointment = self.create_appointment_record(
             request,
-            consultation_fee,
             auth_token,
         ).await?;
 
-        // **Step 7: Post-Creation Tasks**
+        // **Step 6: Post-Creation Tasks**
         self.handle_post_booking_tasks(&appointment, auth_token).await?;
 
         info!("Appointment {} booked successfully", appointment.id);
@@ -209,7 +198,7 @@ impl AppointmentBookingService {
 
         let cancelled_appointment = self.update_appointment(appointment_id, update_request, auth_token).await?;
 
-        // Handle post-cancellation tasks (refunds, notifications, etc.)
+        // Handle post-cancellation tasks
         self.handle_post_cancellation_tasks(&cancelled_appointment, &request, auth_token).await?;
 
         info!("Appointment {} cancelled successfully", appointment_id);
@@ -330,7 +319,7 @@ impl AppointmentBookingService {
         Ok(appointments)
     }
 
-    /// Get appointment statistics
+    /// Get appointment statistics (without financial data)
     pub async fn get_appointment_stats(
         &self,
         patient_id: Option<Uuid>,
@@ -365,11 +354,6 @@ impl AppointmentBookingService {
             .filter(|apt| apt.status == AppointmentStatus::NoShow)
             .count() as i32;
 
-        let total_revenue = appointments.iter()
-            .filter(|apt| matches!(apt.status, AppointmentStatus::Completed | AppointmentStatus::InProgress))
-            .map(|apt| apt.consultation_fee)
-            .sum();
-
         let average_consultation_duration = if completed_appointments > 0 {
             appointments.iter()
                 .filter(|apt| apt.status == AppointmentStatus::Completed)
@@ -391,7 +375,6 @@ impl AppointmentBookingService {
             completed_appointments,
             cancelled_appointments,
             no_show_appointments,
-            total_revenue,
             average_consultation_duration,
             appointment_type_breakdown,
         })
@@ -528,7 +511,6 @@ impl AppointmentBookingService {
     async fn create_appointment_record(
         &self,
         request: BookAppointmentRequest,
-        consultation_fee: f64,
         auth_token: &str,
     ) -> Result<Appointment, AppointmentError> {
         let end_time = request.appointment_date + Duration::minutes(request.duration_minutes as i64);
@@ -541,7 +523,6 @@ impl AppointmentBookingService {
             "status": AppointmentStatus::Pending.to_string(),
             "appointment_type": request.appointment_type.to_string(),
             "duration_minutes": request.duration_minutes,
-            "consultation_fee": consultation_fee,
             "timezone": request.timezone,
             "scheduled_start_time": request.appointment_date.to_rfc3339(),
             "scheduled_end_time": end_time.to_rfc3339(),
@@ -696,7 +677,6 @@ impl AppointmentBookingService {
         // - Send confirmation email/SMS to patient
         // - Send notification to doctor
         // - Create calendar events
-        // - Integrate with payment system
         
         debug!("Post-booking tasks completed for appointment {}", appointment.id);
         Ok(())
@@ -709,7 +689,6 @@ impl AppointmentBookingService {
         _auth_token: &str
     ) -> Result<(), AppointmentError> {
         // TODO: Implement post-cancellation tasks
-        // - Process refunds if applicable
         // - Send cancellation notifications
         // - Update calendar events
         // - Log cancellation reason for analytics
