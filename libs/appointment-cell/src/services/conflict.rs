@@ -1,3 +1,4 @@
+// libs/appointment-cell/src/services/conflict.rs
 use anyhow::Result;
 use chrono::{DateTime, Utc, Duration, Timelike};
 use reqwest::Method;
@@ -65,7 +66,6 @@ impl ConflictDetectionService {
 
             // Generate suggestions if there's a conflict
             let suggested_alternatives = if has_conflict {
-                // Box the recursive call to avoid infinitely sized future
                 self.generate_alternative_slots(
                     doctor_id,
                     start_time,
@@ -115,7 +115,7 @@ impl ConflictDetectionService {
         })
     }
 
-    /// Check if a patient has too many appointments in a day
+    /// Check if a patient has too many appointments in a day (business rule validation)
     pub async fn check_patient_daily_limit(
         &self,
         patient_id: Uuid,
@@ -144,7 +144,7 @@ impl ConflictDetectionService {
         Ok(active_appointments_count < max_per_day)
     }
 
-    /// Check for back-to-back appointment conflicts
+    /// Check for back-to-back appointment conflicts with buffer time
     pub async fn check_buffer_time_conflicts(
         &self,
         doctor_id: Uuid,
@@ -172,7 +172,7 @@ impl ConflictDetectionService {
         Ok(!conflict_response.has_conflict)
     }
 
-    /// Find the next available slot after a conflict
+    /// Find the next available slot after a conflict (basic implementation)
     pub async fn find_next_available_slot(
         &self,
         doctor_id: Uuid,
@@ -203,8 +203,8 @@ impl ConflictDetectionService {
             ).await?;
 
             if !conflict_response.has_conflict {
-                // Validate that this is during doctor's working hours
-                if self.is_during_working_hours(doctor_id, current_time, auth_token).await? {
+                // Validate that this is during working hours (basic check)
+                if self.is_during_working_hours(current_time) {
                     return Ok(Some(SuggestedSlot {
                         start_time: current_time,
                         end_time: slot_end,
@@ -298,8 +298,7 @@ impl ConflictDetectionService {
         start2: DateTime<Utc>,
         end2: DateTime<Utc>,
     ) -> bool {
-        // Two appointments overlap if:
-        // start1 < end2 AND start2 < end1
+        // Two appointments overlap if: start1 < end2 AND start2 < end1
         start1 < end2 && start2 < end1
     }
 
@@ -341,7 +340,7 @@ impl ConflictDetectionService {
                     auth_token,
                 ).await?;
 
-                if !conflict_response.has_conflict {
+                if !conflict_response.has_conflict && self.is_during_working_hours(current_time) {
                     suggestions.push(SuggestedSlot {
                         start_time: current_time,
                         end_time: slot_end,
@@ -378,15 +377,10 @@ impl ConflictDetectionService {
         Ok(suggestions)
     }
 
-    async fn is_during_working_hours(
-        &self,
-        _doctor_id: Uuid,
-        _time: DateTime<Utc>,
-        _auth_token: &str,
-    ) -> Result<bool, AppointmentError> {
-        // TODO: Integrate with doctor availability service
-        // For now, assume standard working hours (8 AM - 8 PM)
-        let hour = _time.hour();
-        Ok(hour >= 8 && hour < 20)
+    /// Basic working hours check (8 AM - 8 PM)
+    /// NOTE: In production, this should integrate with doctor availability service
+    fn is_during_working_hours(&self, time: DateTime<Utc>) -> bool {
+        let hour = time.hour();
+        hour >= 8 && hour < 20
     }
 }

@@ -1,5 +1,6 @@
+// libs/appointment-cell/src/services/booking.rs
 use anyhow::{Result, anyhow};
-use chrono::{DateTime, Utc, Duration};
+use chrono::{DateTime, Utc, Duration, NaiveTime};
 use reqwest::Method;
 use serde_json::{json, Value};
 use tracing::{debug, info, warn, error};
@@ -8,14 +9,15 @@ use std::sync::Arc;
 
 use shared_config::AppConfig;
 use shared_database::supabase::SupabaseClient;
-use doctor_cell::services::availability::AvailabilityService;
-use doctor_cell::models::AvailabilityQueryRequest;
+use doctor_cell::services::matching::DoctorMatchingService;
+use doctor_cell::models::{DoctorMatchingRequest, DoctorMatch};
 
 use crate::models::{
     Appointment, AppointmentStatus, AppointmentType, BookAppointmentRequest,
     UpdateAppointmentRequest, RescheduleAppointmentRequest, CancelAppointmentRequest,
-    AppointmentSearchQuery, AppointmentSummary, AppointmentStats, AppointmentError,
-    AppointmentValidationRules, CancelledBy
+    AppointmentSearchQuery, AppointmentStats, AppointmentError,
+    AppointmentValidationRules, CancelledBy, SmartBookingRequest, SmartBookingResponse,
+    AlternativeSlot
 };
 use crate::services::conflict::ConflictDetectionService;
 use crate::services::lifecycle::AppointmentLifecycleService;
@@ -24,7 +26,7 @@ pub struct AppointmentBookingService {
     supabase: Arc<SupabaseClient>,
     conflict_service: ConflictDetectionService,
     lifecycle_service: AppointmentLifecycleService,
-    availability_service: AvailabilityService,
+    doctor_matching_service: DoctorMatchingService, // NEW: Integrated doctor matching
     validation_rules: AppointmentValidationRules,
 }
 
@@ -33,41 +35,104 @@ impl AppointmentBookingService {
         let supabase = Arc::new(SupabaseClient::new(config));
 
         let conflict_service = ConflictDetectionService::new(Arc::clone(&supabase));
-        let lifecycle_service = AppointmentLifecycleService::new(Arc::clone(&supabase));
-        let availability_service = AvailabilityService::new(config);
+        let lifecycle_service = AppointmentLifecycleService::new();
+        let doctor_matching_service = DoctorMatchingService::new(config); // NEW
 
         Self {
             conflict_service,
             lifecycle_service,
-            availability_service,
+            doctor_matching_service, // NEW
             supabase,
             validation_rules: AppointmentValidationRules::default(),
         }
     }
 
-    /// Book a new appointment with comprehensive validation
+    /// NEW: Smart booking with automatic doctor selection and history prioritization
+    pub async fn smart_book_appointment(
+        &self,
+        request: SmartBookingRequest,
+        auth_token: &str,
+    ) -> Result<SmartBookingResponse, AppointmentError> {
+        info!("Smart booking appointment for patient {} with specialty {:?}", 
+              request.patient_id, request.specialty_required);
+
+        // **Step 1: Comprehensive Validation**
+        self.validate_smart_booking_request(&request).await?;
+        
+        // **Step 2: Find Best Doctor Match with History Prioritization**
+        let doctor_match = self.find_best_doctor_match(&request, auth_token).await?;
+        
+        // **Step 3: Select Best Available Slot**
+        let selected_slot = self.select_optimal_slot(&doctor_match, &request).await?;
+        
+        // **Step 4: Create Traditional Booking Request**
+        let booking_request = BookAppointmentRequest {
+            patient_id: request.patient_id,
+            doctor_id: Some(doctor_match.doctor.id),
+            appointment_date: selected_slot.start_time,
+            appointment_type: request.appointment_type,
+            duration_minutes: request.duration_minutes,
+            timezone: request.timezone,
+            patient_notes: request.patient_notes,
+            preferred_language: None,
+            specialty_required: request.specialty_required,
+        };
+        
+        // **Step 5: Book the Appointment**
+        let appointment = self.book_appointment(booking_request, auth_token).await?;
+        
+        // **Step 6: Generate Alternative Slots**
+        let alternative_slots = self.generate_alternative_slots(
+            &request, 
+            &doctor_match.doctor.id, 
+            auth_token
+        ).await?;
+
+        // **Step 7: Check if this is a preferred doctor (has history)**
+        let is_preferred_doctor = doctor_match.match_reasons.iter()
+            .any(|reason| reason.contains("Previous patient"));
+
+        info!("Smart booking completed for appointment {} with doctor {} (preferred: {})", 
+              appointment.id, doctor_match.doctor.id, is_preferred_doctor);
+
+        Ok(SmartBookingResponse {
+            appointment,
+            doctor_match_score: doctor_match.match_score,
+            match_reasons: doctor_match.match_reasons,
+            is_preferred_doctor,
+            alternative_slots,
+        })
+    }
+
+    /// Enhanced appointment booking with specialty validation and history awareness
     pub async fn book_appointment(
         &self,
         request: BookAppointmentRequest,
         auth_token: &str,
     ) -> Result<Appointment, AppointmentError> {
-        info!("Booking appointment for patient {} with doctor {}", 
+        info!("Booking appointment for patient {} with doctor {:?}", 
               request.patient_id, request.doctor_id);
 
         // **Step 1: Comprehensive Validation**
         self.validate_booking_request(&request).await?;
         
-        // **Step 2: Verify Patient and Doctor Exist**
+        // **Step 2: Verify Patient Exists**
         self.verify_patient_exists(&request.patient_id, auth_token).await?;
-        let _doctor_info = self.verify_doctor_available(&request.doctor_id, auth_token).await?;
         
-        // **Step 3: Check Doctor Availability for Specific Slot**
-        self.verify_slot_available(&request, auth_token).await?;
+        // **Step 3: Doctor Selection and Validation**
+        let selected_doctor_id = if let Some(doctor_id) = request.doctor_id {
+            // Validate specific doctor
+            self.validate_specific_doctor(doctor_id, &request, auth_token).await?;
+            doctor_id
+        } else {
+            // Find best doctor automatically using history prioritization
+            self.find_best_available_doctor(&request, auth_token).await?
+        };
         
         // **Step 4: Detect Conflicts**
         let end_time = request.appointment_date + Duration::minutes(request.duration_minutes as i64);
         let conflict_check = self.conflict_service.check_conflicts(
-            request.doctor_id,
+            selected_doctor_id,
             request.appointment_date,
             end_time,
             None,
@@ -76,12 +141,13 @@ impl AppointmentBookingService {
 
         if conflict_check.has_conflict {
             warn!("Appointment conflict detected for doctor {} at {}", 
-                  request.doctor_id, request.appointment_date);
+                  selected_doctor_id, request.appointment_date);
             return Err(AppointmentError::ConflictDetected);
         }
 
         // **Step 5: Create Appointment Record**
         let appointment = self.create_appointment_record(
+            selected_doctor_id,
             request,
             auth_token,
         ).await?;
@@ -89,7 +155,8 @@ impl AppointmentBookingService {
         // **Step 6: Post-Creation Tasks**
         self.handle_post_booking_tasks(&appointment, auth_token).await?;
 
-        info!("Appointment {} booked successfully", appointment.id);
+        info!("Appointment {} booked successfully with doctor {}", 
+              appointment.id, selected_doctor_id);
         Ok(appointment)
     }
 
@@ -299,7 +366,7 @@ impl AppointmentBookingService {
         let query = AppointmentSearchQuery {
             patient_id,
             doctor_id,
-            status: None, // All active statuses
+            status: None,
             appointment_type: None,
             from_date: Some(now),
             to_date: Some(tomorrow),
@@ -319,7 +386,7 @@ impl AppointmentBookingService {
         Ok(appointments)
     }
 
-    /// Get appointment statistics (without financial data)
+    /// Get appointment statistics with doctor continuity metrics
     pub async fn get_appointment_stats(
         &self,
         patient_id: Option<Uuid>,
@@ -370,6 +437,13 @@ impl AppointmentBookingService {
         }
         let appointment_type_breakdown: Vec<(AppointmentType, i32)> = type_breakdown.into_iter().collect();
 
+        // NEW: Calculate doctor continuity rate
+        let doctor_continuity_rate = if let Some(patient_id) = patient_id {
+            self.calculate_doctor_continuity_rate(patient_id, auth_token).await.unwrap_or(0.0)
+        } else {
+            0.0
+        };
+
         Ok(AppointmentStats {
             total_appointments,
             completed_appointments,
@@ -377,6 +451,7 @@ impl AppointmentBookingService {
             no_show_appointments,
             average_consultation_duration,
             appointment_type_breakdown,
+            doctor_continuity_rate, // NEW
         })
     }
 
@@ -384,19 +459,322 @@ impl AppointmentBookingService {
     pub async fn check_conflicts(
         &self,
         doctor_id: Uuid,
-        start_time: chrono::DateTime<chrono::Utc>,
-        end_time: chrono::DateTime<chrono::Utc>,
+        start_time: DateTime<Utc>,
+        end_time: DateTime<Utc>,
         exclude_appointment_id: Option<Uuid>,
         auth_token: &str,
-    ) -> Result<crate::models::ConflictCheckResponse, crate::models::AppointmentError> {
+    ) -> Result<crate::models::ConflictCheckResponse, AppointmentError> {
         self.conflict_service
             .check_conflicts(doctor_id, start_time, end_time, exclude_appointment_id, auth_token)
             .await
     }
 
     // ==============================================================================
-    // PRIVATE HELPER METHODS
+    // PRIVATE HELPER METHODS - ENHANCED WITH HISTORY PRIORITIZATION
     // ==============================================================================
+
+    /// NEW: Find best doctor match using history prioritization
+    async fn find_best_doctor_match(
+        &self,
+        request: &SmartBookingRequest,
+        auth_token: &str,
+    ) -> Result<DoctorMatch, AppointmentError> {
+        debug!("Finding best doctor match for patient {} with specialty {:?}", 
+               request.patient_id, request.specialty_required);
+
+        let matching_request = DoctorMatchingRequest {
+            patient_id: request.patient_id,
+            preferred_date: request.preferred_date,
+            preferred_time_start: request.preferred_time_start,
+            preferred_time_end: request.preferred_time_end,
+            specialty_required: request.specialty_required.clone(),
+            appointment_type: request.appointment_type.to_string(),
+            duration_minutes: request.duration_minutes,
+            timezone: request.timezone.clone(),
+        };
+
+        let best_match = self.doctor_matching_service
+            .find_best_doctor(matching_request, auth_token)
+            .await
+            .map_err(|e| match e {
+                doctor_cell::models::DoctorError::NotAvailable => {
+                    if let Some(specialty) = &request.specialty_required {
+                        AppointmentError::SpecialtyNotAvailable { 
+                            specialty: specialty.clone() 
+                        }
+                    } else {
+                        AppointmentError::DoctorNotAvailable
+                    }
+                },
+                _ => AppointmentError::DoctorMatchingError(e.to_string()),
+            })?;
+
+        best_match.ok_or_else(|| {
+            if let Some(specialty) = &request.specialty_required {
+                AppointmentError::SpecialtyNotAvailable { 
+                    specialty: specialty.clone() 
+                }
+            } else {
+                AppointmentError::DoctorNotAvailable
+            }
+        })
+    }
+
+    /// NEW: Select optimal slot from doctor's available slots
+    async fn select_optimal_slot(
+        &self,
+        doctor_match: &DoctorMatch,
+        request: &SmartBookingRequest,
+    ) -> Result<&doctor_cell::models::AvailableSlot, AppointmentError> {
+        if doctor_match.available_slots.is_empty() {
+            return Err(AppointmentError::SlotNotAvailable);
+        }
+
+        // Prefer slots that match the requested time window
+        if let (Some(start_time), Some(end_time)) = (request.preferred_time_start, request.preferred_time_end) {
+            for slot in &doctor_match.available_slots {
+                let slot_time = slot.start_time.time();
+                if slot_time >= start_time && slot_time <= end_time {
+                    return Ok(slot);
+                }
+            }
+        }
+
+        // Return the first available slot if no preference match
+        Ok(&doctor_match.available_slots[0])
+    }
+
+    /// NEW: Generate alternative appointment slots
+    async fn generate_alternative_slots(
+        &self,
+        request: &SmartBookingRequest,
+        exclude_doctor_id: &Uuid,
+        auth_token: &str,
+    ) -> Result<Vec<AlternativeSlot>, AppointmentError> {
+        debug!("Generating alternative slots for patient {}", request.patient_id);
+
+        let matching_request = DoctorMatchingRequest {
+            patient_id: request.patient_id,
+            preferred_date: request.preferred_date,
+            preferred_time_start: request.preferred_time_start,
+            preferred_time_end: request.preferred_time_end,
+            specialty_required: request.specialty_required.clone(),
+            appointment_type: request.appointment_type.to_string(),
+            duration_minutes: request.duration_minutes,
+            timezone: request.timezone.clone(),
+        };
+
+        let matches = self.doctor_matching_service
+            .find_matching_doctors(matching_request, auth_token, Some(5))
+            .await
+            .map_err(|e| AppointmentError::DoctorMatchingError(e.to_string()))?;
+
+        let mut alternatives = Vec::new();
+        for doctor_match in matches {
+            if doctor_match.doctor.id == *exclude_doctor_id {
+                continue; // Skip the already selected doctor
+            }
+
+            for slot in doctor_match.available_slots.iter().take(2) { // Max 2 slots per doctor
+                let has_history = doctor_match.match_reasons.iter()
+                    .any(|reason| reason.contains("Previous patient"));
+
+                alternatives.push(AlternativeSlot {
+                    doctor_id: doctor_match.doctor.id,
+                    doctor_name: doctor_match.doctor.full_name.clone(),
+                    start_time: slot.start_time,
+                    end_time: slot.end_time,
+                    match_score: doctor_match.match_score,
+                    has_patient_history: has_history,
+                });
+            }
+        }
+
+        // Sort by match score (history prioritization)
+        alternatives.sort_by(|a, b| b.match_score.partial_cmp(&a.match_score).unwrap());
+        alternatives.truncate(10); // Limit to 10 alternatives
+
+        Ok(alternatives)
+    }
+
+    /// NEW: Calculate doctor continuity rate for patient
+    async fn calculate_doctor_continuity_rate(
+        &self,
+        patient_id: Uuid,
+        auth_token: &str,
+    ) -> Result<f32, AppointmentError> {
+        let query = AppointmentSearchQuery {
+            patient_id: Some(patient_id),
+            doctor_id: None,
+            status: Some(AppointmentStatus::Completed),
+            appointment_type: None,
+            from_date: None,
+            to_date: None,
+            limit: None,
+            offset: None,
+        };
+
+        let appointments = self.search_appointments(query, auth_token).await?;
+        
+        if appointments.len() < 2 {
+            return Ok(0.0); // Need at least 2 appointments to calculate continuity
+        }
+
+        let mut doctor_counts = std::collections::HashMap::new();
+        for appointment in &appointments {
+            *doctor_counts.entry(appointment.doctor_id).or_insert(0) += 1;
+        }
+
+        // Calculate continuity as percentage of appointments with previously seen doctors
+        let repeat_appointments = doctor_counts.values()
+            .filter(|&&count| count > 1)
+            .map(|&count| count - 1) // Subtract first visit
+            .sum::<i32>();
+
+        let continuity_rate = repeat_appointments as f32 / appointments.len() as f32;
+        Ok(continuity_rate)
+    }
+
+    /// ENHANCED: Find best available doctor automatically with history prioritization
+    async fn find_best_available_doctor(
+        &self,
+        request: &BookAppointmentRequest,
+        auth_token: &str,
+    ) -> Result<Uuid, AppointmentError> {
+        debug!("Finding best available doctor for patient {} with specialty {:?}", 
+               request.patient_id, request.specialty_required);
+
+        let matching_request = DoctorMatchingRequest {
+            patient_id: request.patient_id,
+            preferred_date: Some(request.appointment_date.date_naive()),
+            preferred_time_start: Some(request.appointment_date.time()),
+            preferred_time_end: Some((request.appointment_date + Duration::hours(2)).time()),
+            specialty_required: request.specialty_required.clone(),
+            appointment_type: request.appointment_type.to_string(),
+            duration_minutes: request.duration_minutes,
+            timezone: request.timezone.clone(),
+        };
+
+        let best_match = self.doctor_matching_service
+            .find_best_doctor(matching_request, auth_token)
+            .await
+            .map_err(|e| match e {
+                doctor_cell::models::DoctorError::NotAvailable => {
+                    if let Some(specialty) = &request.specialty_required {
+                        AppointmentError::SpecialtyNotAvailable { 
+                            specialty: specialty.clone() 
+                        }
+                    } else {
+                        AppointmentError::DoctorNotAvailable
+                    }
+                },
+                _ => AppointmentError::DoctorMatchingError(e.to_string()),
+            })?;
+
+        match best_match {
+            Some(doctor_match) => Ok(doctor_match.doctor.id),
+            None => {
+                if let Some(specialty) = &request.specialty_required {
+                    Err(AppointmentError::SpecialtyNotAvailable { 
+                        specialty: specialty.clone() 
+                    })
+                } else {
+                    Err(AppointmentError::DoctorNotAvailable)
+                }
+            }
+        }
+    }
+
+    /// ENHANCED: Validate specific doctor with specialty checking
+    async fn validate_specific_doctor(
+        &self,
+        doctor_id: Uuid,
+        request: &BookAppointmentRequest,
+        auth_token: &str,
+    ) -> Result<(), AppointmentError> {
+        debug!("Validating specific doctor: {}", doctor_id);
+
+        let path = format!("/rest/v1/doctors?id=eq.{}", doctor_id);
+        let result: Vec<Value> = self.supabase.request(
+            Method::GET,
+            &path,
+            Some(auth_token),
+            None,
+        ).await.map_err(|e| AppointmentError::DatabaseError(e.to_string()))?;
+
+        if result.is_empty() {
+            return Err(AppointmentError::DoctorNotFound);
+        }
+
+        let doctor_info = &result[0];
+        
+        // Check if doctor is available for appointments
+        if !doctor_info["is_available"].as_bool().unwrap_or(false) {
+            return Err(AppointmentError::DoctorNotAvailable);
+        }
+
+        // Check if doctor is verified
+        if !doctor_info["is_verified"].as_bool().unwrap_or(false) {
+            return Err(AppointmentError::DoctorNotAvailable);
+        }
+
+        // NEW: Validate specialty match if required
+        if let Some(ref required_specialty) = request.specialty_required {
+            let doctor_specialty = doctor_info["specialty"].as_str().unwrap_or("");
+            if !doctor_specialty.to_lowercase().contains(&required_specialty.to_lowercase()) {
+                return Err(AppointmentError::SpecialtyNotAvailable { 
+                    specialty: required_specialty.clone() 
+                });
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn validate_smart_booking_request(&self, request: &SmartBookingRequest) -> Result<(), AppointmentError> {
+        let now = Utc::now();
+
+        // Validate duration
+        if request.duration_minutes < self.validation_rules.min_appointment_duration {
+            return Err(AppointmentError::InvalidTime(
+                format!("Appointment duration must be at least {} minutes", 
+                       self.validation_rules.min_appointment_duration)
+            ));
+        }
+
+        if request.duration_minutes > self.validation_rules.max_appointment_duration {
+            return Err(AppointmentError::InvalidTime(
+                format!("Appointment duration cannot exceed {} minutes", 
+                       self.validation_rules.max_appointment_duration)
+            ));
+        }
+
+        // Validate preferred date if provided
+        if let Some(preferred_date) = request.preferred_date {
+            let min_advance = Duration::hours(self.validation_rules.min_advance_booking_hours as i64);
+            let max_advance = Duration::days(self.validation_rules.max_advance_booking_days as i64);
+            
+            let preferred_datetime = preferred_date.and_time(
+                request.preferred_time_start.unwrap_or(NaiveTime::from_hms_opt(9, 0, 0).unwrap())
+            ).and_utc();
+
+            if preferred_datetime <= now + min_advance {
+                return Err(AppointmentError::InvalidTime(
+                    format!("Appointment must be booked at least {} hours in advance", 
+                           self.validation_rules.min_advance_booking_hours)
+                ));
+            }
+
+            if preferred_datetime >= now + max_advance {
+                return Err(AppointmentError::InvalidTime(
+                    format!("Appointment cannot be booked more than {} days in advance", 
+                           self.validation_rules.max_advance_booking_days)
+                ));
+            }
+        }
+
+        Ok(())
+    }
 
     async fn validate_booking_request(&self, request: &BookAppointmentRequest) -> Result<(), AppointmentError> {
         let now = Utc::now();
@@ -453,63 +831,9 @@ impl AppointmentBookingService {
         Ok(())
     }
 
-    async fn verify_doctor_available(&self, doctor_id: &Uuid, auth_token: &str) -> Result<Value, AppointmentError> {
-        let path = format!("/rest/v1/doctors?id=eq.{}", doctor_id);
-        let result: Vec<Value> = self.supabase.request(
-            Method::GET,
-            &path,
-            Some(auth_token),
-            None,
-        ).await.map_err(|e| AppointmentError::DatabaseError(e.to_string()))?;
-
-        if result.is_empty() {
-            return Err(AppointmentError::DoctorNotFound);
-        }
-
-        let doctor_info = &result[0];
-        
-        // Check if doctor is available for appointments
-        if !doctor_info["is_available"].as_bool().unwrap_or(false) {
-            return Err(AppointmentError::DoctorNotAvailable);
-        }
-
-        // Check if doctor is verified
-        if !doctor_info["is_verified"].as_bool().unwrap_or(false) {
-            return Err(AppointmentError::DoctorNotAvailable);
-        }
-
-        Ok(doctor_info.clone())
-    }
-
-    async fn verify_slot_available(&self, request: &BookAppointmentRequest, auth_token: &str) -> Result<(), AppointmentError> {
-        let availability_query = AvailabilityQueryRequest {
-            date: request.appointment_date.date_naive(),
-            timezone: Some(request.timezone.clone()),
-            appointment_type: Some(request.appointment_type.to_string()),
-            duration_minutes: Some(request.duration_minutes),
-        };
-
-        let available_slots = self.availability_service.get_available_slots(
-            &request.doctor_id.to_string(),
-            availability_query,
-            auth_token,
-        ).await.map_err(|e| AppointmentError::ExternalServiceError(e.to_string()))?;
-
-        // Check if the requested time slot is available
-        let requested_end_time = request.appointment_date + Duration::minutes(request.duration_minutes as i64);
-        let slot_available = available_slots.iter().any(|slot| {
-            slot.start_time <= request.appointment_date && slot.end_time >= requested_end_time
-        });
-
-        if !slot_available {
-            return Err(AppointmentError::SlotNotAvailable);
-        }
-
-        Ok(())
-    }
-
     async fn create_appointment_record(
         &self,
+        doctor_id: Uuid,
         request: BookAppointmentRequest,
         auth_token: &str,
     ) -> Result<Appointment, AppointmentError> {
@@ -518,7 +842,7 @@ impl AppointmentBookingService {
 
         let appointment_data = json!({
             "patient_id": request.patient_id,
-            "doctor_id": request.doctor_id,
+            "doctor_id": doctor_id,
             "appointment_date": request.appointment_date.to_rfc3339(),
             "status": AppointmentStatus::Pending.to_string(),
             "appointment_type": request.appointment_type.to_string(),

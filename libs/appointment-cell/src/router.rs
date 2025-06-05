@@ -1,8 +1,9 @@
+// libs/appointment-cell/src/router.rs
 use std::sync::Arc;
 
 use axum::{
     Router,
-    routing::{get, post, put, patch, delete},
+    routing::{get, post, put, patch},
     middleware,
 };
 
@@ -14,7 +15,8 @@ use crate::handlers;
 pub fn appointment_routes(state: Arc<AppConfig>) -> Router {
     // All appointment operations require authentication
     let protected_routes = Router::new()
-        // Core appointment management
+        // ENHANCED: Core appointment management with smart booking
+        .route("/smart-book", post(handlers::smart_book_appointment)) // NEW: Smart booking with history prioritization
         .route("/", post(handlers::book_appointment))
         .route("/search", get(handlers::search_appointments))
         .route("/{appointment_id}", get(handlers::get_appointment))
@@ -29,7 +31,7 @@ pub fn appointment_routes(state: Arc<AppConfig>) -> Router {
         
         // Utility endpoints
         .route("/conflicts/check", get(handlers::check_appointment_conflicts))
-        .route("/stats", get(handlers::get_appointment_stats))
+        .route("/stats", get(handlers::get_appointment_stats)) // ENHANCED: Now includes continuity metrics
         
         .layer(middleware::from_fn_with_state(state.clone(), auth_middleware));
 

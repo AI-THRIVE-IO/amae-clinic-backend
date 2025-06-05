@@ -1,3 +1,4 @@
+// libs/appointment-cell/src/handlers.rs
 use std::sync::Arc;
 
 use axum::{
@@ -18,7 +19,7 @@ use shared_models::error::AppError;
 use crate::models::{
     BookAppointmentRequest, UpdateAppointmentRequest, RescheduleAppointmentRequest,
     CancelAppointmentRequest, AppointmentSearchQuery, AppointmentStatus, AppointmentType,
-    ConflictCheckRequest
+    SmartBookingRequest, AppointmentError
 };
 use crate::services::booking::AppointmentBookingService;
 
@@ -60,9 +61,55 @@ pub struct StatsQuery {
 }
 
 // ==============================================================================
-// APPOINTMENT BOOKING HANDLERS
+// ENHANCED APPOINTMENT BOOKING HANDLERS
 // ==============================================================================
 
+/// NEW: Smart appointment booking with automatic doctor selection and history prioritization
+#[axum::debug_handler]
+pub async fn smart_book_appointment(
+    State(state): State<Arc<AppConfig>>,
+    TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
+    Extension(user): Extension<User>,
+    Json(request): Json<SmartBookingRequest>,
+) -> Result<Json<Value>, AppError> {
+    let token = auth.token();
+    
+    // Verify authorization - only patient can book their own appointment or admin can book
+    let is_patient = request.patient_id.to_string() == user.id;
+    let is_admin = user.role.as_deref() == Some("admin");
+    
+    if !is_patient && !is_admin {
+        return Err(AppError::Auth("Not authorized to book appointment for this patient".to_string()));
+    }
+    
+    let booking_service = AppointmentBookingService::new(&state);
+    
+    let smart_booking_response = booking_service.smart_book_appointment(request, token).await
+        .map_err(|e| match e {
+            AppointmentError::SpecialtyNotAvailable { specialty } => {
+                AppError::NotFound(format!("No {} doctors available at this time", specialty))
+            },
+            AppointmentError::DoctorNotAvailable => {
+                AppError::NotFound("No doctors available at this time".to_string())
+            },
+            AppointmentError::ConflictDetected => {
+                AppError::BadRequest("Appointment slot no longer available".to_string())
+            },
+            _ => AppError::Internal(e.to_string()),
+        })?;
+    
+    Ok(Json(json!({
+        "success": true,
+        "smart_booking": smart_booking_response,
+        "message": if smart_booking_response.is_preferred_doctor {
+            "Appointment booked with your preferred doctor based on consultation history"
+        } else {
+            "Appointment booked with best available doctor"
+        }
+    })))
+}
+
+/// Enhanced appointment booking with specialty validation
 #[axum::debug_handler]
 pub async fn book_appointment(
     State(state): State<Arc<AppConfig>>,
@@ -84,7 +131,33 @@ pub async fn book_appointment(
     let booking_service = AppointmentBookingService::new(&state);
     
     let appointment = booking_service.book_appointment(request, token).await
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+        .map_err(|e| match e {
+            AppointmentError::SpecialtyNotAvailable { specialty } => {
+                AppError::NotFound(format!("No {} doctors available at this time", specialty))
+            },
+            AppointmentError::DoctorNotAvailable => {
+                AppError::NotFound("Doctor not available at requested time".to_string())
+            },
+            AppointmentError::ConflictDetected => {
+                AppError::BadRequest("Appointment slot conflicts with existing booking".to_string())
+            },
+            AppointmentError::SlotNotAvailable => {
+                AppError::BadRequest("Appointment slot no longer available".to_string())
+            },
+            AppointmentError::PatientNotFound => {
+                AppError::NotFound("Patient not found".to_string())
+            },
+            AppointmentError::DoctorNotFound => {
+                AppError::NotFound("Doctor not found".to_string())
+            },
+            AppointmentError::InvalidTime(msg) => {
+                AppError::BadRequest(msg)
+            },
+            AppointmentError::ValidationError(msg) => {
+                AppError::BadRequest(msg)
+            },
+            _ => AppError::Internal(e.to_string()),
+        })?;
     
     Ok(Json(json!({
         "success": true,
@@ -105,7 +178,7 @@ pub async fn get_appointment(
     
     let appointment = booking_service.get_appointment(appointment_id, token).await
         .map_err(|e| match e {
-            crate::models::AppointmentError::NotFound => AppError::NotFound("Appointment not found".to_string()),
+            AppointmentError::NotFound => AppError::NotFound("Appointment not found".to_string()),
             _ => AppError::Internal(e.to_string()),
         })?;
     
@@ -135,7 +208,7 @@ pub async fn update_appointment(
     // Get appointment to check authorization
     let appointment = booking_service.get_appointment(appointment_id, token).await
         .map_err(|e| match e {
-            crate::models::AppointmentError::NotFound => AppError::NotFound("Appointment not found".to_string()),
+            AppointmentError::NotFound => AppError::NotFound("Appointment not found".to_string()),
             _ => AppError::Internal(e.to_string()),
         })?;
     
@@ -156,7 +229,18 @@ pub async fn update_appointment(
     }
     
     let updated_appointment = booking_service.update_appointment(appointment_id, request, token).await
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+        .map_err(|e| match e {
+            AppointmentError::ConflictDetected => {
+                AppError::BadRequest("Appointment conflicts with existing booking".to_string())
+            },
+            AppointmentError::InvalidStatusTransition(status) => {
+                AppError::BadRequest(format!("Cannot transition from current status: {}", status))
+            },
+            AppointmentError::InvalidTime(msg) => {
+                AppError::BadRequest(msg)
+            },
+            _ => AppError::Internal(e.to_string()),
+        })?;
     
     Ok(Json(json!({
         "success": true,
@@ -179,7 +263,7 @@ pub async fn reschedule_appointment(
     // Get appointment to check authorization
     let appointment = booking_service.get_appointment(appointment_id, token).await
         .map_err(|e| match e {
-            crate::models::AppointmentError::NotFound => AppError::NotFound("Appointment not found".to_string()),
+            AppointmentError::NotFound => AppError::NotFound("Appointment not found".to_string()),
             _ => AppError::Internal(e.to_string()),
         })?;
     
@@ -193,7 +277,15 @@ pub async fn reschedule_appointment(
     }
     
     let rescheduled_appointment = booking_service.reschedule_appointment(appointment_id, request, token).await
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+        .map_err(|e| match e {
+            AppointmentError::ConflictDetected => {
+                AppError::BadRequest("New appointment time conflicts with existing booking".to_string())
+            },
+            AppointmentError::InvalidTime(msg) => {
+                AppError::BadRequest(msg)
+            },
+            _ => AppError::Internal(e.to_string()),
+        })?;
     
     Ok(Json(json!({
         "success": true,
@@ -216,7 +308,7 @@ pub async fn cancel_appointment(
     // Get appointment to check authorization
     let appointment = booking_service.get_appointment(appointment_id, token).await
         .map_err(|e| match e {
-            crate::models::AppointmentError::NotFound => AppError::NotFound("Appointment not found".to_string()),
+            AppointmentError::NotFound => AppError::NotFound("Appointment not found".to_string()),
             _ => AppError::Internal(e.to_string()),
         })?;
     
@@ -230,7 +322,15 @@ pub async fn cancel_appointment(
     }
     
     let cancelled_appointment = booking_service.cancel_appointment(appointment_id, request, token).await
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+        .map_err(|e| match e {
+            AppointmentError::InvalidStatusTransition(status) => {
+                AppError::BadRequest(format!("Cannot cancel appointment in status: {}", status))
+            },
+            AppointmentError::InvalidTime(msg) => {
+                AppError::BadRequest(msg)
+            },
+            _ => AppError::Internal(e.to_string()),
+        })?;
     
     Ok(Json(json!({
         "success": true,
@@ -427,7 +527,6 @@ pub async fn check_appointment_conflicts(
     let token = auth.token();
     let booking_service = AppointmentBookingService::new(&state);
 
-    // Use a public method instead of accessing the private field directly
     let conflict_response = booking_service
         .check_conflicts(
             params.doctor_id,
@@ -442,6 +541,7 @@ pub async fn check_appointment_conflicts(
     Ok(Json(json!(conflict_response)))
 }
 
+/// Enhanced appointment statistics with doctor continuity metrics
 #[axum::debug_handler]
 pub async fn get_appointment_stats(
     State(state): State<Arc<AppConfig>>,
@@ -476,5 +576,8 @@ pub async fn get_appointment_stats(
         token,
     ).await.map_err(|e| AppError::Internal(e.to_string()))?;
     
-    Ok(Json(json!(stats)))
+    Ok(Json(json!({
+        "stats": stats,
+        "note": "Statistics include doctor continuity rate showing percentage of appointments with previously seen doctors"
+    })))
 }

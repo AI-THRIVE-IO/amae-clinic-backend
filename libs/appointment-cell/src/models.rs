@@ -1,3 +1,4 @@
+// libs/appointment-cell/src/models.rs
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use chrono::{DateTime, Utc, NaiveDate, NaiveTime};
@@ -22,8 +23,8 @@ pub struct Appointment {
     pub actual_start_time: Option<DateTime<Utc>>,
     pub actual_end_time: Option<DateTime<Utc>>,
     pub notes: Option<String>,
-    pub patient_notes: Option<String>,  // Patient's initial notes
-    pub doctor_notes: Option<String>,  // Doctor's notes during/after consultation
+    pub patient_notes: Option<String>,
+    pub doctor_notes: Option<String>,
     pub prescription_issued: bool,
     pub medical_certificate_issued: bool,
     pub report_generated: bool,
@@ -35,13 +36,13 @@ pub struct Appointment {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum AppointmentStatus {
-    Pending,       // Just booked, awaiting confirmation
-    Confirmed,     // Doctor confirmed
-    InProgress,    // Consultation started
-    Completed,     // Consultation finished
-    Cancelled,     // Cancelled by patient or doctor
-    NoShow,        // Patient didn't show up
-    Rescheduled,   // Moved to different time
+    Pending,
+    Confirmed,
+    InProgress,
+    Completed,
+    Cancelled,
+    NoShow,
+    Rescheduled,
 }
 
 impl fmt::Display for AppointmentStatus {
@@ -61,13 +62,13 @@ impl fmt::Display for AppointmentStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum AppointmentType {
-    GeneralConsultation, // Standard consultation
-    FollowUp,            // Follow-up appointment
-    Prescription,        // Prescription renewal
-    MedicalCertificate,   // Sick note/medical certificate
-    Urgent,              // Urgent consultation
-    MentalHealth,        // Mental health consultation
-    WomensHealth,        // Women's health specific
+    GeneralConsultation,
+    FollowUp,
+    Prescription,
+    MedicalCertificate,
+    Urgent,
+    MentalHealth,
+    WomensHealth,
 }
 
 impl fmt::Display for AppointmentType {
@@ -85,19 +86,34 @@ impl fmt::Display for AppointmentType {
 }
 
 // ==============================================================================
-// REQUEST/RESPONSE MODELS
+// REQUEST/RESPONSE MODELS  
 // ==============================================================================
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BookAppointmentRequest {
     pub patient_id: Uuid,
-    pub doctor_id: Uuid,
+    pub doctor_id: Option<Uuid>, // Made optional - system can find best doctor
     pub appointment_date: DateTime<Utc>,
     pub appointment_type: AppointmentType,
     pub duration_minutes: i32,
     pub timezone: String,
     pub patient_notes: Option<String>,
     pub preferred_language: Option<String>,
+    pub specialty_required: Option<String>, // Added for specialty validation
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SmartBookingRequest {
+    pub patient_id: Uuid,
+    pub preferred_date: Option<NaiveDate>,
+    pub preferred_time_start: Option<NaiveTime>,
+    pub preferred_time_end: Option<NaiveTime>,
+    pub appointment_type: AppointmentType,
+    pub duration_minutes: i32,
+    pub timezone: String,
+    pub specialty_required: Option<String>,
+    pub patient_notes: Option<String>,
+    pub allow_history_prioritization: Option<bool>, // Enable doctor history matching
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -143,6 +159,29 @@ pub struct AppointmentSearchQuery {
 }
 
 // ==============================================================================
+// ENHANCED BOOKING RESPONSE MODELS
+// ==============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SmartBookingResponse {
+    pub appointment: Appointment,
+    pub doctor_match_score: f32,
+    pub match_reasons: Vec<String>,
+    pub is_preferred_doctor: bool, // True if patient has seen this doctor before
+    pub alternative_slots: Vec<AlternativeSlot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AlternativeSlot {
+    pub doctor_id: Uuid,
+    pub doctor_name: String,
+    pub start_time: DateTime<Utc>,
+    pub end_time: DateTime<Utc>,
+    pub match_score: f32,
+    pub has_patient_history: bool,
+}
+
+// ==============================================================================
 // CONFLICT DETECTION MODELS
 // ==============================================================================
 
@@ -170,7 +209,7 @@ pub struct SuggestedSlot {
 }
 
 // ==============================================================================
-// APPOINTMENT SUMMARY MODELS
+// STATISTICS AND SUMMARY MODELS
 // ==============================================================================
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -192,10 +231,11 @@ pub struct AppointmentStats {
     pub no_show_appointments: i32,
     pub average_consultation_duration: i32,
     pub appointment_type_breakdown: Vec<(AppointmentType, i32)>,
+    pub doctor_continuity_rate: f32, // % of appointments with previously seen doctors
 }
 
 // ==============================================================================
-// ERROR TYPES
+// ENHANCED ERROR TYPES
 // ==============================================================================
 
 #[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error)]
@@ -205,6 +245,9 @@ pub enum AppointmentError {
     
     #[error("Appointment slot not available")]
     SlotNotAvailable,
+    
+    #[error("No {specialty} doctors available at this time")]
+    SpecialtyNotAvailable { specialty: String },
     
     #[error("Doctor not available at requested time")]
     DoctorNotAvailable,
@@ -235,6 +278,9 @@ pub enum AppointmentError {
     
     #[error("External service error: {0}")]
     ExternalServiceError(String),
+    
+    #[error("Doctor matching service error: {0}")]
+    DoctorMatchingError(String),
 }
 
 // ==============================================================================
@@ -250,18 +296,20 @@ pub struct AppointmentValidationRules {
     pub max_appointments_per_day: i32,
     pub min_appointment_duration: i32,
     pub max_appointment_duration: i32,
+    pub enable_history_prioritization: bool, // New flag for history-based matching
 }
 
 impl Default for AppointmentValidationRules {
     fn default() -> Self {
         Self {
-            min_advance_booking_hours: 2,    // Must book at least 2 hours ahead
-            max_advance_booking_days: 90,    // Can book up to 90 days ahead
-            allowed_cancellation_hours: 24,  // Can cancel up to 24 hours before
-            allowed_reschedule_hours: 48,    // Can reschedule up to 48 hours before
-            max_appointments_per_day: 3,     // Max 3 appointments per patient per day
-            min_appointment_duration: 15,    // Minimum 15 minutes
-            max_appointment_duration: 120,   // Maximum 2 hours
+            min_advance_booking_hours: 2,
+            max_advance_booking_days: 90,
+            allowed_cancellation_hours: 24,
+            allowed_reschedule_hours: 48,
+            max_appointments_per_day: 3,
+            min_appointment_duration: 15,
+            max_appointment_duration: 120,
+            enable_history_prioritization: true, // Enable by default
         }
     }
 }

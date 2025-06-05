@@ -1,21 +1,16 @@
-use std::sync::Arc;
+// libs/appointment-cell/src/services/lifecycle.rs
 use chrono::{DateTime, Utc, Duration};
 use chrono::Timelike;
 use chrono::Datelike;
 use tracing::{debug, info, warn};
-use uuid::Uuid;
-
-use shared_database::supabase::SupabaseClient;
 
 use crate::models::{AppointmentStatus, AppointmentError};
 
-pub struct AppointmentLifecycleService {
-    supabase: Arc<SupabaseClient>,
-}
+pub struct AppointmentLifecycleService;
 
 impl AppointmentLifecycleService {
-    pub fn new(supabase: Arc<SupabaseClient>) -> Self {
-        Self { supabase }
+    pub fn new() -> Self {
+        Self
     }
 
     /// Validate that a status transition is allowed
@@ -117,7 +112,7 @@ impl AppointmentLifecycleService {
 
         match current_status {
             AppointmentStatus::Pending => {
-                actions.push("Waiting for payment confirmation".to_string());
+                actions.push("Waiting for confirmation".to_string());
                 if current_time > scheduled_start_time - Duration::hours(24) {
                     actions.push("Send reminder notification".to_string());
                 }
@@ -140,6 +135,7 @@ impl AppointmentLifecycleService {
             AppointmentStatus::Completed => {
                 actions.push("Generate consultation report".to_string());
                 actions.push("Send follow-up instructions".to_string());
+                actions.push("Update patient history for future matching".to_string()); // NEW
             },
             AppointmentStatus::Cancelled => {
                 actions.push("Process refund if applicable".to_string());
@@ -228,13 +224,14 @@ impl AppointmentLifecycleService {
         Ok(())
     }
 
-    /// Calculate appointment metrics for analytics
+    /// Calculate appointment metrics for analytics including continuity metrics
     pub fn calculate_appointment_metrics(
         &self,
         scheduled_start_time: DateTime<Utc>,
         scheduled_end_time: DateTime<Utc>,
         actual_start_time: Option<DateTime<Utc>>,
         actual_end_time: Option<DateTime<Utc>>,
+        has_patient_history: bool, // NEW: Track if patient has seen this doctor before
     ) -> AppointmentMetrics {
         let scheduled_duration = (scheduled_end_time - scheduled_start_time).num_minutes();
         
@@ -253,6 +250,7 @@ impl AppointmentLifecycleService {
             actual_duration_minutes: actual_duration,
             start_delay_minutes: start_delay,
             end_variance_minutes: end_variance,
+            has_patient_history, // NEW
         }
     }
 }
@@ -281,13 +279,14 @@ impl Default for AppointmentLifecycleRules {
     }
 }
 
-/// Metrics for appointment performance analysis
+/// Enhanced metrics for appointment performance analysis
 #[derive(Debug, Clone)]
 pub struct AppointmentMetrics {
     pub scheduled_duration_minutes: i64,
     pub actual_duration_minutes: Option<i64>,
     pub start_delay_minutes: Option<i64>,
     pub end_variance_minutes: Option<i64>,
+    pub has_patient_history: bool, // NEW: Track continuity of care
 }
 
 impl AppointmentMetrics {
@@ -302,5 +301,10 @@ impl AppointmentMetrics {
         } else {
             None
         }
+    }
+
+    /// NEW: Check if this appointment contributes to doctor continuity
+    pub fn contributes_to_continuity(&self) -> bool {
+        self.has_patient_history
     }
 }
