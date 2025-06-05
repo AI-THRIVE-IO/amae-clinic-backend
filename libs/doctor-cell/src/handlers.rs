@@ -26,6 +26,8 @@ use crate::models::{
     CreateAvailabilityOverrideRequest,
 };
 
+use crate::models::DoctorError;
+
 // Query parameters for different endpoints
 #[derive(Debug, Deserialize)]
 pub struct DoctorSearchQuery {
@@ -423,25 +425,38 @@ pub async fn find_matching_doctors(
     
     let matching_service = DoctorMatchingService::new(&state);
     
+    // Clone specialty_required so it can be used after moving into DoctorMatchingRequest
+    let specialty_required = query.specialty_required.clone();
+
     let request = DoctorMatchingRequest {
         patient_id: uuid::Uuid::parse_str(&user.id)
             .map_err(|_| AppError::BadRequest("Invalid patient ID".to_string()))?,
         preferred_date: query.preferred_date,
         preferred_time_start: query.preferred_time_start,
         preferred_time_end: query.preferred_time_end,
-        specialty_required: query.specialty_required,
+        specialty_required,
         appointment_type: query.appointment_type,
         duration_minutes: query.duration_minutes,
         timezone: query.timezone,
     };
     
     let matches = matching_service.find_matching_doctors(request, token, query.max_results).await
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+        .map_err(|e| match e {
+            DoctorError::NotAvailable => {
+                if let Some(specialty) = query.specialty_required.clone() {
+                    AppError::NotFound(format!("No {} doctors available at this time", specialty))
+                } else {
+                    AppError::NotFound("No doctors available at this time".to_string())
+                }
+            },
+            DoctorError::ValidationError(msg) => AppError::BadRequest(msg),
+            _ => AppError::Internal(e.to_string()),
+        })?;
     
     Ok(Json(json!({
         "matches": matches,
         "total": matches.len(),
-        "note": "Theoretical matches based on doctor schedules. Verify actual availability with appointment-cell."
+        "note": "Results prioritize doctors with previous patient relationship"
     })))
 }
 

@@ -217,7 +217,7 @@ impl std::fmt::Display for DoctorError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             DoctorError::NotFound => write!(f, "Doctor not found"),
-            DoctorError::NotAvailable => write!(f, "Doctor is not available"),
+            DoctorError::NotAvailable => write!(f, "No doctors with the required specialty are available at this time"),
             DoctorError::InvalidTimezone => write!(f, "Invalid timezone specified"),
             DoctorError::InvalidTimeSlot => write!(f, "Invalid time slot"),
             DoctorError::UnauthorizedAccess => write!(f, "Unauthorized access to doctor data"),
@@ -225,5 +225,6 @@ impl std::fmt::Display for DoctorError {
         }
     }
 }
+
 
 impl std::error::Error for DoctorError {}
