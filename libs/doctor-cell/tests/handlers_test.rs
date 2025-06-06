@@ -1,0 +1,613 @@
+use std::sync::Arc;
+use axum::{
+    extract::{Extension, State},
+    Json,
+};
+use axum_extra::TypedHeader;
+use headers::{Authorization, authorization::Bearer};
+use serde_json::json;
+use wiremock::{MockServer, Mock, ResponseTemplate};
+use wiremock::matchers::{method, path, header, query_param};
+use chrono::{NaiveDate, NaiveTime};
+use uuid::Uuid;
+
+use doctor_cell::handlers::*;
+use doctor_cell::models::*;
+use shared_config::AppConfig;
+use shared_models::{auth::User, error::AppError};
+use shared_utils::test_utils::{TestConfig, TestUser, JwtTestUtils, MockSupabaseResponses};
+
+fn create_test_config() -> AppConfig {
+    TestConfig::default().to_app_config()
+}
+
+fn create_test_user_extension(role: &str, id: &str) -> Extension<User> {
+    Extension(User {
+        id: id.to_string(),
+        email: Some(format!("{}@example.com", role)),
+        role: Some(role.to_string()),
+        metadata: None,
+        created_at: Some(chrono::Utc::now()),
+    })
+}
+
+fn create_auth_header(token: &str) -> TypedHeader<Authorization<Bearer>> {
+    let auth = Authorization::bearer(token).unwrap();
+    TypedHeader(auth)
+}
+
+#[tokio::test]
+async fn test_create_doctor_success() {
+    let mock_server = MockServer::start().await;
+    let config = AppConfig {
+        supabase_url: mock_server.uri(),
+        supabase_anon_key: "test-anon-key".to_string(),
+        supabase_jwt_secret: "test-secret-key-for-jwt-validation-must-be-long-enough".to_string(),
+    };
+    
+    let admin_user = TestUser::admin("admin@example.com");
+    let token = JwtTestUtils::create_test_token(&admin_user, &config.supabase_jwt_secret, Some(24));
+    
+    let doctor_id = Uuid::new_v4();
+    let request = CreateDoctorRequest {
+        full_name: "Dr. John Smith".to_string(),
+        email: "dr.smith@example.com".to_string(),
+        specialty: "Cardiology".to_string(),
+        bio: Some("Experienced cardiologist".to_string()),
+        license_number: Some("MD123456".to_string()),
+        years_experience: Some(10),
+        timezone: "UTC".to_string(),
+    };
+
+    // Mock the create doctor API call
+    Mock::given(method("POST"))
+        .and(path("/rest/v1/doctors"))
+        .and(header("Authorization", format!("Bearer {}", token)))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            "id": doctor_id,
+            "full_name": request.full_name,
+            "email": request.email,
+            "specialty": request.specialty,
+            "bio": request.bio,
+            "license_number": request.license_number,
+            "years_experience": request.years_experience,
+            "timezone": request.timezone,
+            "is_verified": false,
+            "is_available": true,
+            "rating": 0.0,
+            "total_consultations": 0,
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-01T00:00:00Z"
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let result = create_doctor(
+        State(Arc::new(config)),
+        create_auth_header(&token),
+        create_test_user_extension("admin", &admin_user.id),
+        Json(request.clone())
+    ).await;
+
+    assert!(result.is_ok());
+    let response = result.unwrap().0;
+    assert_eq!(response["full_name"], request.full_name);
+    assert_eq!(response["specialty"], request.specialty);
+}
+
+#[tokio::test]
+async fn test_create_doctor_unauthorized() {
+    let config = Arc::new(create_test_config());
+    let patient_user = TestUser::patient("patient@example.com");
+    let token = JwtTestUtils::create_test_token(&patient_user, &config.supabase_jwt_secret, Some(24));
+    
+    let request = CreateDoctorRequest {
+        full_name: "Dr. John Smith".to_string(),
+        email: "dr.smith@example.com".to_string(),
+        specialty: "Cardiology".to_string(),
+        bio: None,
+        license_number: None,
+        years_experience: None,
+        timezone: "UTC".to_string(),
+    };
+
+    let result = create_doctor(
+        State(config),
+        create_auth_header(&token),
+        create_test_user_extension("patient", &patient_user.id),
+        Json(request)
+    ).await;
+
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        AppError::Auth(msg) => assert!(msg.contains("Only administrators")),
+        _ => panic!("Expected Auth error"),
+    }
+}
+
+#[tokio::test]
+async fn test_get_doctor_success() {
+    let mock_server = MockServer::start().await;
+    let config = AppConfig {
+        supabase_url: mock_server.uri(),
+        supabase_anon_key: "test-anon-key".to_string(),
+        supabase_jwt_secret: "test-secret-key-for-jwt-validation-must-be-long-enough".to_string(),
+    };
+    
+    let user = TestUser::patient("patient@example.com");
+    let token = JwtTestUtils::create_test_token(&user, &config.supabase_jwt_secret, Some(24));
+    let doctor_id = Uuid::new_v4().to_string();
+
+    // Mock the get doctor API call
+    Mock::given(method("GET"))
+        .and(path(format!("/rest/v1/doctors")))
+        .and(query_param("id", format!("eq.{}", doctor_id)))
+        .and(header("Authorization", format!("Bearer {}", token)))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([{
+            "id": doctor_id,
+            "full_name": "Dr. Jane Smith",
+            "email": "dr.jane@example.com",
+            "specialty": "Dermatology",
+            "bio": "Skin specialist",
+            "is_verified": true,
+            "is_available": true,
+            "rating": 4.5,
+            "total_consultations": 100,
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-01T00:00:00Z"
+        }])))
+        .mount(&mock_server)
+        .await;
+
+    let result = get_doctor(
+        State(Arc::new(config)),
+        axum::extract::Path(doctor_id.clone()),
+        create_auth_header(&token)
+    ).await;
+
+    assert!(result.is_ok());
+    let response = result.unwrap().0;
+    assert_eq!(response[0]["id"], doctor_id);
+    assert_eq!(response[0]["specialty"], "Dermatology");
+}
+
+#[tokio::test]
+async fn test_update_doctor_as_self() {
+    let mock_server = MockServer::start().await;
+    let config = AppConfig {
+        supabase_url: mock_server.uri(),
+        supabase_anon_key: "test-anon-key".to_string(),
+        supabase_jwt_secret: "test-secret-key-for-jwt-validation-must-be-long-enough".to_string(),
+    };
+    
+    let doctor_id = Uuid::new_v4().to_string();
+    let doctor_user = TestUser::doctor("doctor@example.com");
+    let token = JwtTestUtils::create_test_token(&doctor_user, &config.supabase_jwt_secret, Some(24));
+    
+    let update_request = UpdateDoctorRequest {
+        full_name: Some("Dr. Updated Name".to_string()),
+        bio: Some("Updated bio".to_string()),
+        specialty: None,
+        years_experience: Some(15),
+        timezone: None,
+        is_available: Some(false),
+    };
+
+    // Mock the update doctor API call
+    Mock::given(method("PATCH"))
+        .and(path(format!("/rest/v1/doctors")))
+        .and(query_param("id", format!("eq.{}", doctor_id)))
+        .and(header("Authorization", format!("Bearer {}", token)))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([{
+            "id": doctor_id,
+            "full_name": "Dr. Updated Name",
+            "bio": "Updated bio",
+            "years_experience": 15,
+            "is_available": false,
+            "updated_at": "2024-01-01T00:00:00Z"
+        }])))
+        .mount(&mock_server)
+        .await;
+
+    let result = update_doctor(
+        State(Arc::new(config)),
+        axum::extract::Path(doctor_id.clone()),
+        create_auth_header(&token),
+        create_test_user_extension("doctor", &doctor_id),
+        Json(update_request)
+    ).await;
+
+    assert!(result.is_ok());
+    let response = result.unwrap().0;
+    assert_eq!(response[0]["full_name"], "Dr. Updated Name");
+}
+
+#[tokio::test]
+async fn test_update_doctor_unauthorized() {
+    let config = Arc::new(create_test_config());
+    let patient_user = TestUser::patient("patient@example.com");
+    let token = JwtTestUtils::create_test_token(&patient_user, &config.supabase_jwt_secret, Some(24));
+    let doctor_id = Uuid::new_v4().to_string();
+    
+    let update_request = UpdateDoctorRequest {
+        full_name: Some("Dr. Malicious Update".to_string()),
+        bio: None,
+        specialty: None,
+        years_experience: None,
+        timezone: None,
+        is_available: None,
+    };
+
+    let result = update_doctor(
+        State(config),
+        axum::extract::Path(doctor_id),
+        create_auth_header(&token),
+        create_test_user_extension("patient", &patient_user.id),
+        Json(update_request)
+    ).await;
+
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        AppError::Auth(msg) => assert!(msg.contains("Not authorized to update")),
+        _ => panic!("Expected Auth error"),
+    }
+}
+
+#[tokio::test]
+async fn test_search_doctors_with_filters() {
+    let mock_server = MockServer::start().await;
+    let config = AppConfig {
+        supabase_url: mock_server.uri(),
+        supabase_anon_key: "test-anon-key".to_string(),
+        supabase_jwt_secret: "test-secret-key-for-jwt-validation-must-be-long-enough".to_string(),
+    };
+    
+    let user = TestUser::patient("patient@example.com");
+    let token = JwtTestUtils::create_test_token(&user, &config.supabase_jwt_secret, Some(24));
+
+    // Mock the search doctors API call
+    Mock::given(method("GET"))
+        .and(path("/rest/v1/doctors"))
+        .and(query_param("specialty", "eq.Cardiology"))
+        .and(header("Authorization", format!("Bearer {}", token)))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {
+                "id": Uuid::new_v4(),
+                "full_name": "Dr. Heart Specialist",
+                "specialty": "Cardiology",
+                "years_experience": 12,
+                "rating": 4.8,
+                "is_verified": true,
+                "is_available": true
+            }
+        ])))
+        .mount(&mock_server)
+        .await;
+
+    let query = DoctorSearchQuery {
+        specialty: Some("Cardiology".to_string()),
+        min_experience: Some(10),
+        min_rating: Some(4.0),
+        is_verified_only: Some(true),
+        limit: Some(10),
+        offset: Some(0),
+    };
+
+    let result = search_doctors(
+        State(Arc::new(config)),
+        axum::extract::Query(query),
+        create_auth_header(&token)
+    ).await;
+
+    assert!(result.is_ok());
+    let response = result.unwrap().0;
+    assert_eq!(response["doctors"].as_array().unwrap().len(), 1);
+    assert_eq!(response["doctors"][0]["specialty"], "Cardiology");
+}
+
+#[tokio::test]
+async fn test_verify_doctor_as_admin() {
+    let mock_server = MockServer::start().await;
+    let config = AppConfig {
+        supabase_url: mock_server.uri(),
+        supabase_anon_key: "test-anon-key".to_string(),
+        supabase_jwt_secret: "test-secret-key-for-jwt-validation-must-be-long-enough".to_string(),
+    };
+    
+    let admin_user = TestUser::admin("admin@example.com");
+    let token = JwtTestUtils::create_test_token(&admin_user, &config.supabase_jwt_secret, Some(24));
+    let doctor_id = Uuid::new_v4().to_string();
+
+    // Mock the verify doctor API call
+    Mock::given(method("PATCH"))
+        .and(path("/rest/v1/doctors"))
+        .and(query_param("id", format!("eq.{}", doctor_id)))
+        .and(header("Authorization", format!("Bearer {}", token)))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([{
+            "id": doctor_id,
+            "is_verified": true,
+            "updated_at": "2024-01-01T00:00:00Z"
+        }])))
+        .mount(&mock_server)
+        .await;
+
+    let payload = json!({ "is_verified": true });
+
+    let result = verify_doctor(
+        State(Arc::new(config)),
+        axum::extract::Path(doctor_id.clone()),
+        create_auth_header(&token),
+        create_test_user_extension("admin", &admin_user.id),
+        Json(payload)
+    ).await;
+
+    assert!(result.is_ok());
+    let response = result.unwrap().0;
+    assert_eq!(response[0]["is_verified"], true);
+}
+
+#[tokio::test]
+async fn test_verify_doctor_unauthorized() {
+    let config = Arc::new(create_test_config());
+    let doctor_user = TestUser::doctor("doctor@example.com");
+    let token = JwtTestUtils::create_test_token(&doctor_user, &config.supabase_jwt_secret, Some(24));
+    let doctor_id = Uuid::new_v4().to_string();
+
+    let payload = json!({ "is_verified": true });
+
+    let result = verify_doctor(
+        State(config),
+        axum::extract::Path(doctor_id),
+        create_auth_header(&token),
+        create_test_user_extension("doctor", &doctor_user.id),
+        Json(payload)
+    ).await;
+
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        AppError::Auth(msg) => assert!(msg.contains("Only administrators")),
+        _ => panic!("Expected Auth error"),
+    }
+}
+
+#[tokio::test]
+async fn test_create_availability_as_doctor() {
+    let mock_server = MockServer::start().await;
+    let config = AppConfig {
+        supabase_url: mock_server.uri(),
+        supabase_anon_key: "test-anon-key".to_string(),
+        supabase_jwt_secret: "test-secret-key-for-jwt-validation-must-be-long-enough".to_string(),
+    };
+    
+    let doctor_id = Uuid::new_v4().to_string();
+    let doctor_user = TestUser::doctor("doctor@example.com");
+    let token = JwtTestUtils::create_test_token(&doctor_user, &config.supabase_jwt_secret, Some(24));
+    
+    let availability_request = CreateAvailabilityRequest {
+        day_of_week: 1, // Monday
+        start_time: NaiveTime::from_hms_opt(9, 0, 0).unwrap(),
+        end_time: NaiveTime::from_hms_opt(17, 0, 0).unwrap(),
+        duration_minutes: 30,
+        timezone: "UTC".to_string(),
+        appointment_type: "consultation".to_string(),
+        buffer_minutes: Some(15),
+        max_concurrent_appointments: Some(1),
+        is_recurring: Some(true),
+        specific_date: None,
+    };
+
+    // Mock the create availability API call
+    Mock::given(method("POST"))
+        .and(path("/rest/v1/doctor_availability"))
+        .and(header("Authorization", format!("Bearer {}", token)))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            "id": Uuid::new_v4(),
+            "doctor_id": doctor_id,
+            "day_of_week": 1,
+            "start_time": "09:00:00",
+            "end_time": "17:00:00",
+            "duration_minutes": 30,
+            "created_at": "2024-01-01T00:00:00Z"
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let result = create_availability(
+        State(Arc::new(config)),
+        axum::extract::Path(doctor_id.clone()),
+        create_auth_header(&token),
+        create_test_user_extension("doctor", &doctor_id),
+        Json(availability_request)
+    ).await;
+
+    assert!(result.is_ok());
+    let response = result.unwrap().0;
+    assert_eq!(response["doctor_id"], doctor_id);
+    assert_eq!(response["day_of_week"], 1);
+}
+
+#[tokio::test]
+async fn test_create_availability_unauthorized() {
+    let config = Arc::new(create_test_config());
+    let patient_user = TestUser::patient("patient@example.com");
+    let token = JwtTestUtils::create_test_token(&patient_user, &config.supabase_jwt_secret, Some(24));
+    let doctor_id = Uuid::new_v4().to_string();
+    
+    let availability_request = CreateAvailabilityRequest {
+        day_of_week: 1,
+        start_time: NaiveTime::from_hms_opt(9, 0, 0).unwrap(),
+        end_time: NaiveTime::from_hms_opt(17, 0, 0).unwrap(),
+        duration_minutes: 30,
+        timezone: "UTC".to_string(),
+        appointment_type: "consultation".to_string(),
+        buffer_minutes: None,
+        max_concurrent_appointments: None,
+        is_recurring: None,
+        specific_date: None,
+    };
+
+    let result = create_availability(
+        State(config),
+        axum::extract::Path(doctor_id),
+        create_auth_header(&token),
+        create_test_user_extension("patient", &patient_user.id),
+        Json(availability_request)
+    ).await;
+
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        AppError::Auth(msg) => assert!(msg.contains("Not authorized to create availability")),
+        _ => panic!("Expected Auth error"),
+    }
+}
+
+#[tokio::test]
+async fn test_get_available_slots() {
+    let mock_server = MockServer::start().await;
+    let config = AppConfig {
+        supabase_url: mock_server.uri(),
+        supabase_anon_key: "test-anon-key".to_string(),
+        supabase_jwt_secret: "test-secret-key-for-jwt-validation-must-be-long-enough".to_string(),
+    };
+    
+    let user = TestUser::patient("patient@example.com");
+    let token = JwtTestUtils::create_test_token(&user, &config.supabase_jwt_secret, Some(24));
+    let doctor_id = Uuid::new_v4().to_string();
+
+    // Mock the get availability API call
+    Mock::given(method("GET"))
+        .and(path("/rest/v1/doctor_availability"))
+        .and(query_param("doctor_id", format!("eq.{}", doctor_id)))
+        .and(header("Authorization", format!("Bearer {}", token)))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {
+                "id": Uuid::new_v4(),
+                "doctor_id": doctor_id,
+                "day_of_week": 1,
+                "start_time": "09:00:00",
+                "end_time": "17:00:00",
+                "duration_minutes": 30,
+                "timezone": "UTC",
+                "appointment_type": "consultation",
+                "is_available": true
+            }
+        ])))
+        .mount(&mock_server)
+        .await;
+
+    let query = AvailabilityQuery {
+        date: NaiveDate::from_ymd_opt(2024, 12, 23).unwrap(), // Monday
+        timezone: Some("UTC".to_string()),
+        appointment_type: Some("consultation".to_string()),
+        duration_minutes: Some(30),
+    };
+
+    let result = get_available_slots(
+        State(Arc::new(config)),
+        axum::extract::Path(doctor_id.clone()),
+        axum::extract::Query(query),
+        create_auth_header(&token)
+    ).await;
+
+    assert!(result.is_ok());
+    let response = result.unwrap().0;
+    assert_eq!(response["doctor_id"], doctor_id);
+    assert!(response["available_slots"].is_array());
+}
+
+#[tokio::test]
+async fn test_find_matching_doctors() {
+    let mock_server = MockServer::start().await;
+    let config = AppConfig {
+        supabase_url: mock_server.uri(),
+        supabase_anon_key: "test-anon-key".to_string(),
+        supabase_jwt_secret: "test-secret-key-for-jwt-validation-must-be-long-enough".to_string(),
+    };
+    
+    let patient_user = TestUser::patient("patient@example.com");
+    let token = JwtTestUtils::create_test_token(&patient_user, &config.supabase_jwt_secret, Some(24));
+
+    // Mock various API calls for matching
+    Mock::given(method("GET"))
+        .and(path("/rest/v1/doctors"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {
+                "id": Uuid::new_v4(),
+                "full_name": "Dr. Cardio Expert",
+                "specialty": "Cardiology",
+                "is_verified": true,
+                "is_available": true,
+                "rating": 4.8
+            }
+        ])))
+        .mount(&mock_server)
+        .await;
+
+    let query = MatchingQuery {
+        preferred_date: Some(NaiveDate::from_ymd_opt(2024, 12, 25).unwrap()),
+        preferred_time_start: Some(NaiveTime::from_hms_opt(10, 0, 0).unwrap()),
+        preferred_time_end: Some(NaiveTime::from_hms_opt(16, 0, 0).unwrap()),
+        specialty_required: Some("Cardiology".to_string()),
+        appointment_type: "consultation".to_string(),
+        duration_minutes: 30,
+        timezone: "UTC".to_string(),
+        max_results: Some(5),
+    };
+
+    let result = find_matching_doctors(
+        State(Arc::new(config)),
+        create_auth_header(&token),
+        create_test_user_extension("patient", &patient_user.id),
+        axum::extract::Query(query)
+    ).await;
+
+    assert!(result.is_ok());
+    let response = result.unwrap().0;
+    assert!(response["matches"].is_array());
+    assert!(response["total"].is_number());
+}
+
+#[tokio::test]
+async fn test_find_matching_doctors_no_specialty() {
+    let mock_server = MockServer::start().await;
+    let config = AppConfig {
+        supabase_url: mock_server.uri(),
+        supabase_anon_key: "test-anon-key".to_string(),
+        supabase_jwt_secret: "test-secret-key-for-jwt-validation-must-be-long-enough".to_string(),
+    };
+    
+    let patient_user = TestUser::patient("patient@example.com");
+    let token = JwtTestUtils::create_test_token(&patient_user, &config.supabase_jwt_secret, Some(24));
+
+    // Mock empty result to simulate no available doctors
+    Mock::given(method("GET"))
+        .and(path("/rest/v1/doctors"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&mock_server)
+        .await;
+
+    let query = MatchingQuery {
+        preferred_date: Some(NaiveDate::from_ymd_opt(2024, 12, 25).unwrap()),
+        preferred_time_start: Some(NaiveTime::from_hms_opt(10, 0, 0).unwrap()),
+        preferred_time_end: Some(NaiveTime::from_hms_opt(16, 0, 0).unwrap()),
+        specialty_required: Some("Nonexistent Specialty".to_string()),
+        appointment_type: "consultation".to_string(),
+        duration_minutes: 30,
+        timezone: "UTC".to_string(),
+        max_results: Some(5),
+    };
+
+    let result = find_matching_doctors(
+        State(Arc::new(config)),
+        create_auth_header(&token),
+        create_test_user_extension("patient", &patient_user.id),
+        axum::extract::Query(query)
+    ).await;
+
+    // This should return an error when no doctors are found
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        AppError::NotFound(msg) => assert!(msg.contains("Nonexistent Specialty")),
+        _ => panic!("Expected NotFound error"),
+    }
+}

@@ -38,7 +38,13 @@ base64 = "0.22.1"
 dotenv = "0.15.0"
 async-trait = "0.1.77"
 
-
+# Test dependencies
+tokio-test = "0.4.4"
+wiremock = "0.6.0"
+assert_matches = "1.5.0"
+mock_instant = "0.3.0"
+tempfile = "3.8.1"
+mockall = "0.13.1"
 
 # Internal dependencies
 auth-cell = { path = "libs/auth-cell" }
