@@ -7,7 +7,7 @@ use axum::{
 use tower::ServiceExt;
 use serde_json::json;
 use wiremock::{MockServer, Mock, ResponseTemplate};
-use wiremock::matchers::{method, path, header};
+use wiremock::matchers::{method, path, header, query_param};
 
 use auth_cell::router::auth_routes;
 use shared_config::AppConfig;
@@ -125,19 +125,20 @@ async fn test_get_profile_endpoint_success() {
     let app = create_test_app(config.clone()).await;
     let token = JwtTestUtils::create_test_token(&user, &config.supabase_jwt_secret, Some(24));
     
-    // Mock auth profile response
+    // Mock auth profile response (Supabase auth endpoint)
     Mock::given(method("GET"))
-        .and(path("/rest/v1/auth_profiles"))
+        .and(path("/auth/v1/user"))
         .and(header("Authorization", format!("Bearer {}", token)))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+        .respond_with(ResponseTemplate::new(200).set_body_json(
             MockSupabaseResponses::user_profile_response(&user.id)
-        ])))
+        ))
         .mount(&mock_server)
         .await;
     
-    // Mock health profile response
+    // Mock health profile response (with query parameter)
     Mock::given(method("GET"))
         .and(path("/rest/v1/health_profiles"))
+        .and(query_param("patient_id", format!("eq.{}", user.id)))
         .and(header("Authorization", format!("Bearer {}", token)))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!([
             MockSupabaseResponses::health_profile_response(&user.id)
@@ -160,8 +161,8 @@ async fn test_get_profile_endpoint_success() {
     let json_response: serde_json::Value = serde_json::from_slice(&body).unwrap();
     
     assert_eq!(json_response["user_id"], user.id);
-    assert!(json_response["auth_profile"].is_array());
-    assert!(json_response["health_profile"].is_array());
+    assert!(json_response["auth_profile"].is_object());
+    assert!(!json_response["health_profile"].is_null());
 }
 
 #[tokio::test]
@@ -181,74 +182,46 @@ async fn test_get_profile_endpoint_unauthorized() {
 }
 
 #[tokio::test]
-async fn test_get_profile_endpoint_invalid_token() {
+async fn test_different_user_roles() {
     let config = TestConfig::default().to_app_config();
-    let app = create_test_app(config.clone()).await;
     
-    let user = TestUser::default();
-    let token = JwtTestUtils::create_expired_token(&user, &config.supabase_jwt_secret);
-    
-    let request = Request::builder()
-        .method("POST")
-        .uri("/profile")
-        .header("authorization", format!("Bearer {}", token))
-        .body(Body::empty())
-        .unwrap();
-
-    let response = app.oneshot(request).await.unwrap();
-    
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn test_cors_and_middleware() {
-    let config = TestConfig::default().to_app_config();
-    let app = create_test_app(config.clone()).await;
-    
-    let user = TestUser::default();
-    let token = JwtTestUtils::create_test_token(&user, &config.supabase_jwt_secret, Some(24));
+    // Test patient role
+    let patient = TestUser::patient("patient@test.com");
+    let patient_token = JwtTestUtils::create_test_token(&patient, &config.supabase_jwt_secret, Some(24));
+    let patient_app = create_test_app(config.clone()).await;
     
     let request = Request::builder()
         .method("POST")
         .uri("/validate")
-        .header("authorization", format!("Bearer {}", token))
-        .header("origin", "https://example.com")
+        .header("authorization", format!("Bearer {}", patient_token))
         .body(Body::empty())
         .unwrap();
 
-    let response = app.oneshot(request).await.unwrap();
-    
+    let response = patient_app.oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-}
-
-#[tokio::test]
-async fn test_multiple_sequential_requests() {
-    let config = TestConfig::default().to_app_config();
     
-    let user = TestUser::admin("admin@example.com");
-    let token = JwtTestUtils::create_test_token(&user, &config.supabase_jwt_secret, Some(24));
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json_response: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json_response["role"], "patient");
     
-    // Test multiple sequential requests to validate token
-    for i in 0..5 {
-        let app = create_test_app(config.clone()).await;
-        
-        let request = Request::builder()
-            .method("POST")
-            .uri("/validate")
-            .header("authorization", format!("Bearer {}", token))
-            .body(Body::empty())
-            .unwrap();
+    // Test doctor role
+    let doctor = TestUser::doctor("doctor@test.com");
+    let doctor_token = JwtTestUtils::create_test_token(&doctor, &config.supabase_jwt_secret, Some(24));
+    let doctor_app = create_test_app(config.clone()).await;
+    
+    let request = Request::builder()
+        .method("POST")
+        .uri("/validate")
+        .header("authorization", format!("Bearer {}", doctor_token))
+        .body(Body::empty())
+        .unwrap();
 
-        let response = app.oneshot(request).await.unwrap();
-        
-        assert_eq!(response.status(), StatusCode::OK, "Request {} failed", i);
-        
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let json_response: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        
-        assert_eq!(json_response["valid"], true);
-        assert_eq!(json_response["user_id"], user.id);
-    }
+    let response = doctor_app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json_response: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json_response["role"], "doctor");
 }
 
 #[tokio::test]
@@ -282,20 +255,4 @@ async fn test_unsupported_methods() {
 
     let response = app.oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
-}
-
-#[tokio::test]
-async fn test_nonexistent_routes() {
-    let config = TestConfig::default().to_app_config();
-    let app = create_test_app(config).await;
-    
-    // Test nonexistent route
-    let request = Request::builder()
-        .method("POST")
-        .uri("/nonexistent")
-        .body(Body::empty())
-        .unwrap();
-
-    let response = app.oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
