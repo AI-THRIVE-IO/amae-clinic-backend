@@ -11,10 +11,19 @@ use wiremock::matchers::{method, path, header, query_param};
 use uuid::Uuid;
 
 use health_profile_cell::handlers::*;
-use health_profile_cell::models::*;
+use health_profile_cell::models::{
+    CreateHealthProfileRequest,
+    UpdateHealthProfile,
+    DocumentUpload,
+    AvatarUpload,
+    CarePlanRequest,
+};
 use shared_config::AppConfig;
 use shared_models::auth::User;
 use shared_utils::test_utils::{TestConfig, TestUser, JwtTestUtils};
+
+// Explicitly import to resolve ambiguity
+// use health_profile_cell::models::CreateHealthProfileRequest;
 
 fn create_test_config() -> AppConfig {
     TestConfig::default().to_app_config()
@@ -48,7 +57,8 @@ async fn test_create_health_profile_success() {
     let token = JwtTestUtils::create_test_token(&patient_user, &config.supabase_jwt_secret, Some(24));
     let profile_id = Uuid::new_v4();
     
-    let create_request = CreateHealthProfileRequest {
+    // Use the same type as expected by the handler
+    let create_request: CreateHealthProfileRequest = CreateHealthProfileRequest {
         patient_id: patient_user.id.clone(),
         is_pregnant: Some(false),
         is_breastfeeding: Some(false),
