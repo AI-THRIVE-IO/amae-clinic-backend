@@ -654,7 +654,7 @@ async fn test_get_available_slots() {
         State(Arc::new(config)),
         axum::extract::Path(doctor_id.clone()),
         axum::extract::Query(AvailabilityQuery {
-            date: NaiveDate::from_ymd_opt(2024, 12, 25).unwrap(),
+            date: NaiveDate::from_ymd_opt(2024, 12, 25).unwrap().to_string(),
             timezone: Some("UTC".to_string()),
             appointment_type: Some("consultation".to_string()),
             duration_minutes: Some(30),

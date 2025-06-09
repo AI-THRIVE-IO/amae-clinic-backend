@@ -41,7 +41,7 @@ pub struct DoctorSearchQuery {
 
 #[derive(Debug, Deserialize)]
 pub struct AvailabilityQuery {
-    pub date: NaiveDate,
+    pub date: String,
     pub timezone: Option<String>,
     pub appointment_type: Option<String>,
     pub duration_minutes: Option<i32>,
@@ -114,8 +114,12 @@ pub async fn get_doctor_availability_public(
 ) -> Result<Json<Value>, AppError> {
     let availability_service = AvailabilityService::new(&state);
     
+    // Parse the date string
+    let date = NaiveDate::parse_from_str(&query.date, "%Y-%m-%d")
+        .map_err(|_| AppError::BadRequest(format!("Invalid date format: {}. Expected YYYY-MM-DD", query.date)))?;
+    
     let availability_request = AvailabilityQueryRequest {
-        date: query.date,
+        date,
         timezone: query.timezone,
         appointment_type: query.appointment_type,
         duration_minutes: query.duration_minutes,
@@ -135,8 +139,12 @@ pub async fn get_available_slots_public(
 ) -> Result<Json<Value>, AppError> {
     let availability_service = AvailabilityService::new(&state);
     
+    // Parse the date string
+    let date = NaiveDate::parse_from_str(&query.date, "%Y-%m-%d")
+        .map_err(|_| AppError::BadRequest(format!("Invalid date format: {}. Expected YYYY-MM-DD", query.date)))?;
+    
     let availability_request = AvailabilityQueryRequest {
-        date: query.date,
+        date,
         timezone: query.timezone,
         appointment_type: query.appointment_type,
         duration_minutes: query.duration_minutes,
@@ -434,8 +442,12 @@ pub async fn get_available_slots(
     let token = auth.token();
     let availability_service = AvailabilityService::new(&state);
     
+    // Parse the date string
+    let date = NaiveDate::parse_from_str(&query.date, "%Y-%m-%d")
+        .map_err(|_| AppError::BadRequest(format!("Invalid date format: {}. Expected YYYY-MM-DD", query.date)))?;
+    
     let availability_query = AvailabilityQueryRequest {
-        date: query.date,
+        date,
         timezone: query.timezone,
         appointment_type: query.appointment_type,
         duration_minutes: query.duration_minutes,
