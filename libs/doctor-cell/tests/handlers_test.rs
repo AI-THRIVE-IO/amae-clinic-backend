@@ -1,4 +1,4 @@
-// libs/doctor-cell/tests/handlers_test.rs - FORENSIC PRECISION FIXED VERSION
+// libs/doctor-cell/tests/handlers_test.rs - CORRECT TABLE NAME FIX
 use std::sync::Arc;
 use axum::{
     extract::{Extension, State},
@@ -77,26 +77,27 @@ fn create_complete_availability_response(id: &str, doctor_id: &str, day_of_week:
 }
 
 // ==============================================================================
-// FORENSIC PRECISION MOCK SETUP BASED ON ACTUAL SERVICE IMPLEMENTATIONS
+// CORRECT TABLE NAME MOCKS - USING ACTUAL DATABASE SCHEMA
 // ==============================================================================
 
 async fn setup_get_available_slots_mocks(mock_server: &MockServer, doctor_id: &str, date: &str) {
     // Calculate weekday for the mock date (2024-12-25 is Wednesday = 3)
     let weekday = 3; // Wednesday
 
-    // EXACT: get_availability_for_day call from availability service
+    // CORRECT: get_availability_for_day call uses appointment_availabilities table
+    // This matches the complex query with or condition for recurring/specific date
     Mock::given(method("GET"))
-        .and(path("/rest/v1/doctor_availability"))
-        .and(query_param("doctor_id", format!("eq.{}", doctor_id)))
-        .and(query_param("day_of_week", format!("eq.{}", weekday)))
-        .and(query_param("is_available", "eq.true"))
+        .and(path("/rest/v1/appointment_availabilities"))
+        .and(query_param_contains("doctor_id", format!("eq.{}", doctor_id)))
+        .and(query_param_contains("day_of_week", format!("eq.{}", weekday)))
+        .and(query_param_contains("is_available", "eq.true"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!([
             create_complete_availability_response(&Uuid::new_v4().to_string(), doctor_id, weekday)
         ])))
         .mount(mock_server)
         .await;
 
-    // EXACT: get_availability_overrides call from availability service  
+    // CORRECT: get_availability_overrides call  
     Mock::given(method("GET"))
         .and(path("/rest/v1/doctor_availability_overrides"))
         .and(query_param("doctor_id", format!("eq.{}", doctor_id)))
@@ -107,18 +108,18 @@ async fn setup_get_available_slots_mocks(mock_server: &MockServer, doctor_id: &s
 }
 
 async fn setup_create_availability_mocks(mock_server: &MockServer, doctor_id: &str, day_of_week: i32) {
-    // EXACT: check_availability_conflicts call from availability service
+    // CORRECT: check_availability_conflicts call uses appointment_availabilities table
     Mock::given(method("GET"))
-        .and(path("/rest/v1/doctor_availability"))
-        .and(query_param("doctor_id", format!("eq.{}", doctor_id)))
-        .and(query_param("day_of_week", format!("eq.{}", day_of_week)))
+        .and(path("/rest/v1/appointment_availabilities"))
+        .and(query_param_contains("doctor_id", format!("eq.{}", doctor_id)))
+        .and(query_param_contains("day_of_week", format!("eq.{}", day_of_week)))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
         .mount(mock_server)
         .await;
 
-    // EXACT: actual create call
+    // CORRECT: actual create call uses appointment_availabilities table
     Mock::given(method("POST"))
-        .and(path("/rest/v1/doctor_availability"))
+        .and(path("/rest/v1/appointment_availabilities"))
         .and(header("Prefer", "return=representation"))
         .respond_with(ResponseTemplate::new(201).set_body_json(json!([
             create_complete_availability_response(&Uuid::new_v4().to_string(), doctor_id, day_of_week)
@@ -128,7 +129,7 @@ async fn setup_create_availability_mocks(mock_server: &MockServer, doctor_id: &s
 }
 
 async fn setup_matching_service_mocks(mock_server: &MockServer, user_id: &str, specialty: Option<&str>) {
-    // EXACT: validate_specialty_availability call (if specialty provided)
+    // CORRECT: validate_specialty_availability call
     if let Some(specialty_name) = specialty {
         Mock::given(method("GET"))
             .and(path("/rest/v1/doctors"))
@@ -140,7 +141,7 @@ async fn setup_matching_service_mocks(mock_server: &MockServer, user_id: &str, s
             .await;
     }
 
-    // EXACT: get_patient_info call - uses auth service
+    // CORRECT: get_patient_info call - uses auth service
     Mock::given(method("GET"))
         .and(path("/auth/v1/user"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
@@ -151,7 +152,7 @@ async fn setup_matching_service_mocks(mock_server: &MockServer, user_id: &str, s
         .mount(mock_server)
         .await;
 
-    // EXACT: get_patient_appointment_history call  
+    // CORRECT: get_patient_appointment_history call  
     Mock::given(method("GET"))
         .and(path("/rest/v1/appointments"))
         .and(query_param("patient_id", format!("eq.{}", user_id)))
@@ -162,7 +163,7 @@ async fn setup_matching_service_mocks(mock_server: &MockServer, user_id: &str, s
         .mount(mock_server)
         .await;
 
-    // EXACT: doctor_service.search_doctors call
+    // CORRECT: doctor_service.search_doctors call
     Mock::given(method("GET"))
         .and(path("/rest/v1/doctors"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!([
@@ -172,9 +173,10 @@ async fn setup_matching_service_mocks(mock_server: &MockServer, user_id: &str, s
         .mount(mock_server)
         .await;
 
-    // EXACT: availability_service.get_available_slots calls for each doctor
+    // CORRECT: availability_service.get_available_slots calls use appointment_availabilities table
     Mock::given(method("GET"))
-        .and(path("/rest/v1/doctor_availability"))
+        .and(path("/rest/v1/appointment_availabilities"))
+        .and(query_param_contains("doctor_id", "eq."))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!([
             create_complete_availability_response(&Uuid::new_v4().to_string(), &Uuid::new_v4().to_string(), 1)
         ])))
@@ -476,7 +478,7 @@ async fn test_search_doctors_with_filters() {
 }
 
 // ==============================================================================
-// FIXED FAILING TESTS - FORENSIC PRECISION
+// FIXED FAILING TESTS - CORRECT TABLE NAMES
 // ==============================================================================
 
 #[tokio::test]
@@ -492,7 +494,7 @@ async fn test_get_available_slots() {
     let token = JwtTestUtils::create_test_token(&user, &config.supabase_jwt_secret, Some(24));
     let doctor_id = Uuid::new_v4().to_string();
 
-    // FORENSIC FIX: Setup exact mocks for get_available_slots service calls
+    // FIXED: Setup correct mocks using appointment_availabilities table
     setup_get_available_slots_mocks(&mock_server, &doctor_id, "2024-12-25").await;
 
     let result = get_available_slots(
@@ -537,7 +539,7 @@ async fn test_create_availability_as_doctor() {
         specific_date: None,
     };
 
-    // FORENSIC FIX: Setup exact mocks for create_availability service calls
+    // FIXED: Setup correct mocks using appointment_availabilities table
     setup_create_availability_mocks(&mock_server, &doctor_user.id, 1).await;
 
     let result = create_availability(
@@ -601,7 +603,7 @@ async fn test_find_matching_doctors_no_specialty() {
     let user = TestUser::patient("patient@example.com");
     let token = JwtTestUtils::create_test_token(&user, &config.supabase_jwt_secret, Some(24));
 
-    // FORENSIC FIX: Setup exact mocks for matching service (no specialty validation)
+    // FIXED: Setup correct mocks using appointment_availabilities table
     setup_matching_service_mocks(&mock_server, &user.id, None).await;
 
     let result = find_matching_doctors(
@@ -635,7 +637,7 @@ async fn test_find_matching_doctors() {
     let user = TestUser::patient("patient@example.com");
     let token = JwtTestUtils::create_test_token(&user, &config.supabase_jwt_secret, Some(24));
 
-    // FORENSIC FIX: Setup exact mocks for matching service WITH specialty validation
+    // FIXED: Setup correct mocks using appointment_availabilities table
     setup_matching_service_mocks(&mock_server, &user.id, Some("Cardiology")).await;
 
     let result = find_matching_doctors(
