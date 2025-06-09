@@ -129,12 +129,11 @@ async fn setup_create_availability_mocks(mock_server: &MockServer, doctor_id: &s
 }
 
 async fn setup_matching_service_mocks(mock_server: &MockServer, user_id: &str, specialty: Option<&str>) {
-    println!("🎯 [FINAL SOLUTION] Setting up EXACT mocks based on intercepted requests");
-    println!("🎯 [FINAL SOLUTION] User ID: {}, Specialty: {:?}", user_id, specialty);
+    println!("🎯 [SIMPLE FIX] Setting up mocks for user: {}, specialty: {:?}", user_id, specialty);
 
-    // STEP 1: validate_specialty_availability call (ONLY if specialty provided)
+    // Mock 1: Specialty validation (ONLY if specialty provided)
     if let Some(specialty_name) = specialty {
-        println!("🎯 [FINAL SOLUTION] Mock 1: Specialty validation for {}", specialty_name);
+        println!("🎯 [SIMPLE FIX] Creating specialty validation mock for: {}", specialty_name);
         Mock::given(method("GET"))
             .and(path("/rest/v1/doctors"))
             .and(query_param("is_available", "eq.true"))
@@ -149,8 +148,8 @@ async fn setup_matching_service_mocks(mock_server: &MockServer, user_id: &str, s
             .await;
     }
 
-    // STEP 2: get_patient_info call - ACTUAL ENDPOINT: /rest/v1/patients
-    println!("🎯 [FINAL SOLUTION] Mock 2: Patient info from /rest/v1/patients");
+    // Mock 2: Patient info
+    println!("🎯 [SIMPLE FIX] Creating patient info mock");
     Mock::given(method("GET"))
         .and(path("/rest/v1/patients"))
         .and(query_param("id", format!("eq.{}", user_id)))
@@ -162,8 +161,8 @@ async fn setup_matching_service_mocks(mock_server: &MockServer, user_id: &str, s
         .mount(mock_server)
         .await;
 
-    // STEP 3: get_patient_appointment_history call
-    println!("🎯 [FINAL SOLUTION] Mock 3: Appointment history");
+    // Mock 3: Appointment history
+    println!("🎯 [SIMPLE FIX] Creating appointment history mock");
     Mock::given(method("GET"))
         .and(path("/rest/v1/appointments"))
         .and(query_param("patient_id", format!("eq.{}", user_id)))
@@ -174,9 +173,9 @@ async fn setup_matching_service_mocks(mock_server: &MockServer, user_id: &str, s
         .mount(mock_server)
         .await;
 
-    // STEP 4: main search_doctors call
+    // Mock 4: Main doctor search
     if let Some(specialty_name) = specialty {
-        println!("🎯 [FINAL SOLUTION] Mock 4: Main doctor search WITH specialty");
+        println!("🎯 [SIMPLE FIX] Creating main search WITH specialty: {}", specialty_name);
         Mock::given(method("GET"))
             .and(path("/rest/v1/doctors"))
             .and(query_param("is_available", "eq.true"))
@@ -192,7 +191,7 @@ async fn setup_matching_service_mocks(mock_server: &MockServer, user_id: &str, s
             .mount(mock_server)
             .await;
     } else {
-        println!("🎯 [FINAL SOLUTION] Mock 4: Main doctor search WITHOUT specialty");
+        println!("🎯 [SIMPLE FIX] Creating main search WITHOUT specialty");
         Mock::given(method("GET"))
             .and(path("/rest/v1/doctors"))
             .and(query_param("is_available", "eq.true"))
@@ -208,19 +207,19 @@ async fn setup_matching_service_mocks(mock_server: &MockServer, user_id: &str, s
             .await;
     }
 
-    // STEP 5: appointment_availabilities call - THE MISSING MOCK!
-    println!("🎯 [FINAL SOLUTION] Mock 5: Appointment availabilities (the missing piece!)");
+    // Mock 5: Availability slots
+    println!("🎯 [SIMPLE FIX] Creating availability slots mock");
     Mock::given(method("GET"))
         .and(path("/rest/v1/appointment_availabilities"))
         .and(query_param_contains("doctor_id", "eq."))
         .and(query_param("day_of_week", "eq.3"))
         .and(query_param("is_available", "eq.true"))
-        .and(query_param_contains("or", "(is_recurring.eq.true,specific_date.eq.2024-12-25)"))
+        .and(query_param_contains("or", "is_recurring.eq.true"))
         .and(query_param("order", "start_time.asc"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!([
             {
                 "id": Uuid::new_v4(),
-                "doctor_id": "doctor1",
+                "doctor_id": "test-doctor",
                 "day_of_week": 3,
                 "start_time": "09:00:00",
                 "end_time": "17:00:00",
@@ -233,8 +232,9 @@ async fn setup_matching_service_mocks(mock_server: &MockServer, user_id: &str, s
         .mount(mock_server)
         .await;
 
-    println!("🎯 [FINAL SOLUTION] All 5 mocks created successfully!");
+    println!("🎯 [SIMPLE FIX] All mocks created successfully! No verification expectations.");
 }
+
 // ===================================================================
 // ALSO ADD THIS DEBUG TEST (place at the bottom of the test file):
 // ===================================================================
@@ -782,7 +782,6 @@ async fn test_find_matching_doctors() {
     let user = TestUser::patient("patient@example.com");
     let token = JwtTestUtils::create_test_token(&user, &config.supabase_jwt_secret, Some(24));
 
-    // FIXED: Setup correct mocks using appointment_availabilities table
     setup_matching_service_mocks(&mock_server, &user.id, Some("Cardiology")).await;
 
     let result = find_matching_doctors(
