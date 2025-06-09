@@ -329,14 +329,17 @@ impl DoctorMatchingService {
             auth_token,
             Some(1), // Just need to know if any exist
             None,
-        ).await.map_err(|e| DoctorError::ValidationError(e.to_string()))?;
+        ).await.map_err(|e| {
+            error!("Failed to validate specialty availability for {}: {}", required_specialty, e);
+            DoctorError::ValidationError(format!("Failed to validate specialty '{}': {}", required_specialty, e))
+        })?;
 
         if specialty_doctors.is_empty() {
             error!("No {} doctors available at this time", required_specialty);
             return Err(DoctorError::NotAvailable);
         }
 
-        debug!("Specialty {} validation passed", required_specialty);
+        debug!("Specialty validation successful for: {} ({} doctors found)", required_specialty, specialty_doctors.len());
         Ok(())
     }
 
@@ -535,11 +538,7 @@ impl DoctorMatchingService {
     }
 
     /// **ENHANCED: Get actual patient appointment history**
-    async fn get_patient_appointment_history(
-        &self,
-        patient_id: &str,
-        auth_token: &str,
-    ) -> Result<Vec<Value>, DoctorError> {
+    async fn get_patient_appointment_history(&self, patient_id: &str, auth_token: &str) -> Result<Vec<Value>, DoctorError> {
         debug!("Retrieving appointment history for patient: {}", patient_id);
         
         let path = format!(
@@ -553,11 +552,11 @@ impl DoctorMatchingService {
             Some(auth_token),
             None,
         ).await.map_err(|e| {
-            error!("Failed to retrieve patient history: {}", e);
-            DoctorError::ValidationError(format!("Failed to retrieve patient history: {}", e))
+            error!("Failed to retrieve patient history for {}: {}", patient_id, e);
+            DoctorError::ValidationError(format!("Failed to retrieve patient history for {}: {}", patient_id, e))
         })?;
 
-        debug!("Found {} completed appointments in patient history", result.len());
+        debug!("Found {} completed appointments in patient history for patient {}", result.len(), patient_id);
         Ok(result)
     }
 
@@ -618,19 +617,29 @@ impl DoctorMatchingService {
     }
 
     async fn get_patient_info(&self, patient_id: &str, auth_token: &str) -> Result<Value, DoctorError> {
+        debug!("Retrieving patient info for patient: {}", patient_id);
+        
         let path = format!("/rest/v1/patients?id=eq.{}", patient_id);
+        
         let result: Vec<Value> = self.supabase.request(
             Method::GET,
             &path,
             Some(auth_token),
             None,
-        ).await.map_err(|e| DoctorError::ValidationError(e.to_string()))?;
+        ).await.map_err(|e| {
+            error!("Failed to retrieve patient info for {}: {}", patient_id, e);
+            DoctorError::ValidationError(format!("Failed to retrieve patient info for {}: {}", patient_id, e))
+        })?;
 
         if result.is_empty() {
+            error!("Patient not found with ID: {}", patient_id);
             return Err(DoctorError::NotFound);
         }
 
-        Ok(result[0].clone())
+        let patient_info = result.into_iter().next().unwrap();
+        debug!("Successfully retrieved patient info for: {}", patient_id);
+        
+        Ok(patient_info)
     }
 
     fn calculate_availability_score(&self, doctor: &Doctor, theoretical_slots: &[AvailableSlot]) -> f32 {
