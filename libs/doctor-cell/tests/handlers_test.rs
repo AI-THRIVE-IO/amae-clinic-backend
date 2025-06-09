@@ -1,4 +1,4 @@
-// libs/doctor-cell/tests/handlers_test.rs
+// libs/doctor-cell/tests/handlers_test.rs - FORENSIC PRECISION FIXED VERSION
 use std::sync::Arc;
 use axum::{
     extract::{Extension, State},
@@ -77,84 +77,113 @@ fn create_complete_availability_response(id: &str, doctor_id: &str, day_of_week:
 }
 
 // ==============================================================================
-// COMPREHENSIVE MOCK SETUP FUNCTIONS
+// FORENSIC PRECISION MOCK SETUP BASED ON ACTUAL SERVICE IMPLEMENTATIONS
 // ==============================================================================
 
-async fn setup_doctor_validation_mocks(mock_server: &MockServer, doctor_id: &str) {
-    // Mock doctor existence validation
+async fn setup_get_available_slots_mocks(mock_server: &MockServer, doctor_id: &str, date: &str) {
+    // Calculate weekday for the mock date (2024-12-25 is Wednesday = 3)
+    let weekday = 3; // Wednesday
+
+    // EXACT: get_availability_for_day call from availability service
     Mock::given(method("GET"))
-        .and(path("/rest/v1/doctors"))
-        .and(query_param("id", format!("eq.{}", doctor_id)))
+        .and(path("/rest/v1/doctor_availability"))
+        .and(query_param("doctor_id", format!("eq.{}", doctor_id)))
+        .and(query_param("day_of_week", format!("eq.{}", weekday)))
+        .and(query_param("is_available", "eq.true"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!([
-            create_complete_doctor_response(doctor_id, "doctor@example.com", "Dr. Test", "General Practice")
+            create_complete_availability_response(&Uuid::new_v4().to_string(), doctor_id, weekday)
+        ])))
+        .mount(mock_server)
+        .await;
+
+    // EXACT: get_availability_overrides call from availability service  
+    Mock::given(method("GET"))
+        .and(path("/rest/v1/doctor_availability_overrides"))
+        .and(query_param("doctor_id", format!("eq.{}", doctor_id)))
+        .and(query_param("override_date", format!("eq.{}", date)))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(mock_server)
+        .await;
+}
+
+async fn setup_create_availability_mocks(mock_server: &MockServer, doctor_id: &str, day_of_week: i32) {
+    // EXACT: check_availability_conflicts call from availability service
+    Mock::given(method("GET"))
+        .and(path("/rest/v1/doctor_availability"))
+        .and(query_param("doctor_id", format!("eq.{}", doctor_id)))
+        .and(query_param("day_of_week", format!("eq.{}", day_of_week)))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(mock_server)
+        .await;
+
+    // EXACT: actual create call
+    Mock::given(method("POST"))
+        .and(path("/rest/v1/doctor_availability"))
+        .and(header("Prefer", "return=representation"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!([
+            create_complete_availability_response(&Uuid::new_v4().to_string(), doctor_id, day_of_week)
         ])))
         .mount(mock_server)
         .await;
 }
 
-async fn setup_patient_info_mocks(mock_server: &MockServer, user_id: &str) {
-    // Mock patient info from auth service
+async fn setup_matching_service_mocks(mock_server: &MockServer, user_id: &str, specialty: Option<&str>) {
+    // EXACT: validate_specialty_availability call (if specialty provided)
+    if let Some(specialty_name) = specialty {
+        Mock::given(method("GET"))
+            .and(path("/rest/v1/doctors"))
+            .and(query_param_contains("specialty", specialty_name))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+                create_complete_doctor_response(&Uuid::new_v4().to_string(), "specialist@example.com", "Dr. Specialist", specialty_name)
+            ])))
+            .mount(mock_server)
+            .await;
+    }
+
+    // EXACT: get_patient_info call - uses auth service
     Mock::given(method("GET"))
         .and(path("/auth/v1/user"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "id": user_id,
             "email": "patient@example.com",
-            "metadata": {"timezone": "UTC"}
+            "user_metadata": {"timezone": "UTC"}
         })))
         .mount(mock_server)
         .await;
-}
 
-async fn setup_appointment_history_mocks(mock_server: &MockServer, patient_id: &str) {
-    // Mock appointment history - empty by default for clean tests
+    // EXACT: get_patient_appointment_history call  
     Mock::given(method("GET"))
         .and(path("/rest/v1/appointments"))
-        .and(query_param_contains("patient_id", format!("eq.{}", patient_id)))
+        .and(query_param("patient_id", format!("eq.{}", user_id)))
+        .and(query_param("status", "eq.completed"))
+        .and(query_param("order", "created_at.desc"))
+        .and(query_param("limit", "50"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
         .mount(mock_server)
         .await;
-}
 
-async fn setup_specialty_validation_mocks(mock_server: &MockServer, specialty: &str) {
-    // Mock specialty validation - return at least one doctor with that specialty
-    Mock::given(method("GET"))
-        .and(path("/rest/v1/doctors"))
-        .and(query_param_contains("specialty", specialty))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
-            create_complete_doctor_response(&Uuid::new_v4().to_string(), "specialist@example.com", "Dr. Specialist", specialty)
-        ])))
-        .mount(mock_server)
-        .await;
-}
-
-async fn setup_availability_mocks(mock_server: &MockServer, doctor_id: &str) {
-    // Mock doctor availability
-    Mock::given(method("GET"))
-        .and(path("/rest/v1/doctor_availability"))
-        .and(query_param_contains("doctor_id", format!("eq.{}", doctor_id)))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
-            create_complete_availability_response(&Uuid::new_v4().to_string(), doctor_id, 1)
-        ])))
-        .mount(mock_server)
-        .await;
-
-    // Mock availability overrides
-    Mock::given(method("GET"))
-        .and(path("/rest/v1/doctor_availability_overrides"))
-        .and(query_param_contains("doctor_id", format!("eq.{}", doctor_id)))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
-        .mount(mock_server)
-        .await;
-}
-
-async fn setup_comprehensive_doctor_search_mocks(mock_server: &MockServer) {
-    // Generic doctor search for matching algorithms
+    // EXACT: doctor_service.search_doctors call
     Mock::given(method("GET"))
         .and(path("/rest/v1/doctors"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!([
             create_complete_doctor_response(&Uuid::new_v4().to_string(), "doctor1@example.com", "Dr. Available", "General Practice"),
-            create_complete_doctor_response(&Uuid::new_v4().to_string(), "doctor2@example.com", "Dr. Specialist", "Cardiology")
+            create_complete_doctor_response(&Uuid::new_v4().to_string(), "doctor2@example.com", "Dr. Specialist", specialty.unwrap_or("Cardiology"))
         ])))
+        .mount(mock_server)
+        .await;
+
+    // EXACT: availability_service.get_available_slots calls for each doctor
+    Mock::given(method("GET"))
+        .and(path("/rest/v1/doctor_availability"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            create_complete_availability_response(&Uuid::new_v4().to_string(), &Uuid::new_v4().to_string(), 1)
+        ])))
+        .mount(mock_server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/rest/v1/doctor_availability_overrides"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
         .mount(mock_server)
         .await;
 }
@@ -447,7 +476,7 @@ async fn test_search_doctors_with_filters() {
 }
 
 // ==============================================================================
-// FIXED FAILING TESTS
+// FIXED FAILING TESTS - FORENSIC PRECISION
 // ==============================================================================
 
 #[tokio::test]
@@ -463,11 +492,8 @@ async fn test_get_available_slots() {
     let token = JwtTestUtils::create_test_token(&user, &config.supabase_jwt_secret, Some(24));
     let doctor_id = Uuid::new_v4().to_string();
 
-    // CRITICAL FIX: Add doctor validation mock first
-    setup_doctor_validation_mocks(&mock_server, &doctor_id).await;
-    
-    // Mock availability for the specific doctor
-    setup_availability_mocks(&mock_server, &doctor_id).await;
+    // FORENSIC FIX: Setup exact mocks for get_available_slots service calls
+    setup_get_available_slots_mocks(&mock_server, &doctor_id, "2024-12-25").await;
 
     let result = get_available_slots(
         State(Arc::new(config)),
@@ -511,26 +537,8 @@ async fn test_create_availability_as_doctor() {
         specific_date: None,
     };
 
-    // CRITICAL FIX: Add doctor validation mock first
-    setup_doctor_validation_mocks(&mock_server, &doctor_user.id).await;
-
-    // Mock conflict check (empty result - no conflicts)
-    Mock::given(method("GET"))
-        .and(path("/rest/v1/doctor_availability"))
-        .and(query_param_contains("doctor_id", format!("eq.{}", doctor_user.id)))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
-        .mount(&mock_server)
-        .await;
-
-    // Mock create availability
-    Mock::given(method("POST"))
-        .and(path("/rest/v1/doctor_availability"))
-        .and(header("Prefer", "return=representation"))
-        .respond_with(ResponseTemplate::new(201).set_body_json(json!([
-            create_complete_availability_response(&Uuid::new_v4().to_string(), &doctor_user.id, 1)
-        ])))
-        .mount(&mock_server)
-        .await;
+    // FORENSIC FIX: Setup exact mocks for create_availability service calls
+    setup_create_availability_mocks(&mock_server, &doctor_user.id, 1).await;
 
     let result = create_availability(
         State(Arc::new(config)),
@@ -593,26 +601,8 @@ async fn test_find_matching_doctors_no_specialty() {
     let user = TestUser::patient("patient@example.com");
     let token = JwtTestUtils::create_test_token(&user, &config.supabase_jwt_secret, Some(24));
 
-    // CRITICAL FIX: Add comprehensive mocks for matching service dependencies
-    setup_patient_info_mocks(&mock_server, &user.id).await;
-    setup_appointment_history_mocks(&mock_server, &user.id).await;
-    setup_comprehensive_doctor_search_mocks(&mock_server).await;
-
-    // Mock availability for found doctors
-    Mock::given(method("GET"))
-        .and(path("/rest/v1/doctor_availability"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
-            create_complete_availability_response(&Uuid::new_v4().to_string(), &Uuid::new_v4().to_string(), 1)
-        ])))
-        .mount(&mock_server)
-        .await;
-
-    // Mock availability overrides
-    Mock::given(method("GET"))
-        .and(path("/rest/v1/doctor_availability_overrides"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
-        .mount(&mock_server)
-        .await;
+    // FORENSIC FIX: Setup exact mocks for matching service (no specialty validation)
+    setup_matching_service_mocks(&mock_server, &user.id, None).await;
 
     let result = find_matching_doctors(
         State(Arc::new(config)),
@@ -645,27 +635,8 @@ async fn test_find_matching_doctors() {
     let user = TestUser::patient("patient@example.com");
     let token = JwtTestUtils::create_test_token(&user, &config.supabase_jwt_secret, Some(24));
 
-    // CRITICAL FIX: Add comprehensive mocks for matching service with specialty
-    setup_specialty_validation_mocks(&mock_server, "Cardiology").await;
-    setup_patient_info_mocks(&mock_server, &user.id).await;
-    setup_appointment_history_mocks(&mock_server, &user.id).await;
-    setup_comprehensive_doctor_search_mocks(&mock_server).await;
-
-    // Mock availability queries for matching doctors
-    Mock::given(method("GET"))
-        .and(path("/rest/v1/doctor_availability"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
-            create_complete_availability_response(&Uuid::new_v4().to_string(), &Uuid::new_v4().to_string(), 1)
-        ])))
-        .mount(&mock_server)
-        .await;
-
-    // Mock availability overrides
-    Mock::given(method("GET"))
-        .and(path("/rest/v1/doctor_availability_overrides"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
-        .mount(&mock_server)
-        .await;
+    // FORENSIC FIX: Setup exact mocks for matching service WITH specialty validation
+    setup_matching_service_mocks(&mock_server, &user.id, Some("Cardiology")).await;
 
     let result = find_matching_doctors(
         State(Arc::new(config)),
