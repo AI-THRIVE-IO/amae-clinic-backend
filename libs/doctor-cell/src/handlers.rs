@@ -60,7 +60,117 @@ pub struct MatchingQuery {
 }
 
 // ==============================================================================
-// DOCTOR PROFILE HANDLERS
+// PUBLIC HANDLERS (NO AUTHENTICATION REQUIRED)
+// ==============================================================================
+
+#[axum::debug_handler]
+pub async fn search_doctors_public(
+    State(state): State<Arc<AppConfig>>,
+    Query(query): Query<DoctorSearchQuery>,
+) -> Result<Json<Value>, AppError> {
+    // Use service account / anon key for public searches
+    let doctor_service = DoctorService::new(&state);
+    
+    let filters = DoctorSearchFilters {
+        specialty: query.specialty,
+        sub_specialty: None,
+        min_experience: query.min_experience,
+        min_rating: query.min_rating,
+        available_date: None,
+        available_time_start: None,
+        available_time_end: None,
+        timezone: None,
+        appointment_type: None,
+        is_verified_only: Some(query.is_verified_only.unwrap_or(true)), // Default to verified only for public
+    };
+    
+    let doctors = doctor_service.search_doctors_public(filters, query.limit, query.offset).await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    
+    Ok(Json(json!({
+        "doctors": doctors,
+        "total": doctors.len()
+    })))
+}
+
+#[axum::debug_handler]
+pub async fn get_doctor_public(
+    State(state): State<Arc<AppConfig>>,
+    Path(doctor_id): Path<String>,
+) -> Result<Json<Value>, AppError> {
+    let doctor_service = DoctorService::new(&state);
+    
+    let doctor = doctor_service.get_doctor_public(&doctor_id).await
+        .map_err(|_| AppError::NotFound("Doctor not found".to_string()))?;
+    
+    Ok(Json(json!(doctor)))
+}
+
+#[axum::debug_handler]
+pub async fn get_doctor_availability_public(
+    State(state): State<Arc<AppConfig>>,
+    Path(doctor_id): Path<String>,
+    Query(query): Query<AvailabilityQuery>,
+) -> Result<Json<Value>, AppError> {
+    let availability_service = AvailabilityService::new(&state);
+    
+    let availability_request = AvailabilityQueryRequest {
+        date: query.date,
+        timezone: query.timezone,
+        appointment_type: query.appointment_type,
+        duration_minutes: query.duration_minutes,
+    };
+    
+    let availability = availability_service.get_doctor_availability_public(&doctor_id, availability_request).await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    
+    Ok(Json(json!(availability)))
+}
+
+#[axum::debug_handler]
+pub async fn get_available_slots_public(
+    State(state): State<Arc<AppConfig>>,
+    Path(doctor_id): Path<String>,
+    Query(query): Query<AvailabilityQuery>,
+) -> Result<Json<Value>, AppError> {
+    let availability_service = AvailabilityService::new(&state);
+    
+    let availability_request = AvailabilityQueryRequest {
+        date: query.date,
+        timezone: query.timezone,
+        appointment_type: query.appointment_type,
+        duration_minutes: query.duration_minutes,
+    };
+    
+    let slots = availability_service.get_available_slots_public(&doctor_id, availability_request).await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    
+    Ok(Json(json!({
+        "available_slots": slots,
+        "doctor_id": doctor_id,
+        "date": query.date,
+        "total_slots": slots.len()
+    })))
+}
+
+#[axum::debug_handler]
+pub async fn get_doctor_specialties_public(
+    State(state): State<Arc<AppConfig>>,
+    Path(doctor_id): Path<String>,
+) -> Result<Json<Value>, AppError> {
+    let doctor_service = DoctorService::new(&state);
+    
+    let specialties = doctor_service.get_doctor_specialties_public(&doctor_id).await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    
+    Ok(Json(json!({
+        "specialties": specialties,
+        "doctor_id": doctor_id
+    })))
+}
+
+// ==============================================================================
+// PROTECTED DOCTOR PROFILE HANDLERS
 // ==============================================================================
 
 #[axum::debug_handler]

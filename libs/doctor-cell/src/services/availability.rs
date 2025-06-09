@@ -2,7 +2,7 @@ use anyhow::{Result, anyhow};
 use chrono::{NaiveDate, NaiveTime, DateTime, Utc, Datelike, Weekday, Duration};
 use reqwest::Method;
 use serde_json::{json, Value};
-use tracing::{debug, warn};
+use tracing::{debug, warn, error};
 use uuid::Uuid;
 
 use shared_config::AppConfig;
@@ -12,19 +12,22 @@ use crate::models::{
     DoctorAvailability, DoctorAvailabilityOverride, AvailableSlot,
     CreateAvailabilityRequest, UpdateAvailabilityRequest,
     CreateAvailabilityOverrideRequest, AvailabilityQueryRequest,
-    DoctorAvailabilityResponse
+    DoctorAvailabilityResponse, DoctorError,
 };
+use crate::services::doctor::DoctorService;
 
 pub struct AvailabilityService {
     supabase: SupabaseClient,
+    config: AppConfig,
 }
 
 impl AvailabilityService {
-    pub fn new(config: &AppConfig) -> Self {
-        Self {
-            supabase: SupabaseClient::new(config),
-        }
+pub fn new(config: &AppConfig) -> Self {
+    Self {
+        supabase: SupabaseClient::new(config),
+        config: config.clone(),
     }
+}
 
     /// Create availability schedule for a doctor
     pub async fn create_availability(
@@ -585,5 +588,75 @@ impl AvailabilityService {
         }
 
         result
+    }
+
+    ///
+    /// PUBLIC API METHODS
+    /// 
+
+     /// PUBLIC: Get doctor availability without authentication
+    pub async fn get_doctor_availability_public(
+        &self,
+        doctor_id: &str,
+        query: AvailabilityQueryRequest,
+    ) -> Result<Vec<AvailableSlot>, DoctorError> {
+        debug!("Getting doctor availability (public): {}", doctor_id);
+
+        // First verify doctor exists and is verified (public check)
+        let doctor_service = DoctorService::new(&self.config);
+        doctor_service.get_doctor_public(doctor_id).await?;
+
+        let day_of_week = query.date.weekday().num_days_from_monday() as i32;
+        let mut query_parts = vec![
+            format!("doctor_id=eq.{}", doctor_id),
+            format!("day_of_week=eq.{}", day_of_week),
+            "is_available=eq.true".to_string(),
+        ];
+
+        if let Some(appointment_type) = &query.appointment_type {
+            query_parts.push(format!("appointment_type=eq.{}", appointment_type));
+        }
+
+        let path = format!("/rest/v1/appointment_availabilities?{}&order=start_time.asc", 
+                          query_parts.join("&"));
+
+        let result: Vec<Value> = self.supabase.request(
+            Method::GET,
+            &path,
+            None, // No auth token
+            None,
+        ).await.map_err(|e| {
+            error!("Failed to get availability (public): {}", e);
+            DoctorError::ValidationError(e.to_string())
+        })?;
+
+        let availability_slots: Vec<AvailableSlot> = result.into_iter()
+            .map(|slot| serde_json::from_value(slot))
+            .collect::<Result<Vec<AvailableSlot>, _>>()
+            .map_err(|e| {
+                error!("Failed to parse availability: {}", e);
+                DoctorError::ValidationError(format!("Failed to parse availability: {}", e))
+            })?;
+
+        debug!("Found {} availability slots (public) for doctor: {}", availability_slots.len(), doctor_id);
+        Ok(availability_slots)
+    }
+
+    /// PUBLIC: Get available slots without authentication
+    pub async fn get_available_slots_public(
+        &self,
+        doctor_id: &str,
+        query: AvailabilityQueryRequest,
+    ) -> Result<Vec<AvailableSlot>, DoctorError> {
+        debug!("Getting available slots (public): {}", doctor_id);
+
+        // Get base availability
+        let availability = self.get_doctor_availability_public(doctor_id, query).await?;
+
+        // For public access, just return theoretical availability
+        // Note: Actual conflict checking would be done by appointment-cell during booking
+        
+        debug!("Returning {} theoretical slots (public) for doctor: {}", availability.len(), doctor_id);
+        Ok(availability)
     }
 }

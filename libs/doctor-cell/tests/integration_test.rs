@@ -1,3 +1,4 @@
+use uuid::Uuid;
 use std::sync::Arc;
 use axum::{
     body::Body,
@@ -7,7 +8,7 @@ use axum::{
 use tower::ServiceExt;
 use serde_json::json;
 use wiremock::{MockServer, Mock, ResponseTemplate};
-use wiremock::matchers::{method, path, header};
+use wiremock::matchers::{method, path, header, query_param};
 use chrono::NaiveTime;
 
 use doctor_cell::router::doctor_routes;
@@ -31,15 +32,8 @@ async fn test_search_doctors_public() {
     
     let app = create_test_app(config.clone()).await;
     
-    // Mock Supabase search response
-    Mock::given(method("GET"))
-        .and(path("/rest/v1/doctors"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
-            MockSupabaseResponses::doctor_profile_response("doctor-1"),
-            MockSupabaseResponses::doctor_profile_response("doctor-2")
-        ])))
-        .mount(&mock_server)
-        .await;
+    // Setup comprehensive mocks
+    setup_search_mocks(&mock_server).await;
 
     let request = Request::builder()
         .method("GET")
@@ -54,8 +48,8 @@ async fn test_search_doctors_public() {
     let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let json_response: serde_json::Value = serde_json::from_slice(&body).unwrap();
     
-    assert!(json_response.is_array());
-    assert_eq!(json_response.as_array().unwrap().len(), 2);
+    assert!(json_response["doctors"].is_array());
+    assert_eq!(json_response["total"], 2);
 }
 
 #[tokio::test]
@@ -71,14 +65,8 @@ async fn test_get_doctor_public() {
     let app = create_test_app(config.clone()).await;
     let doctor_id = "doctor-123";
     
-    // Mock Supabase get doctor response
-    Mock::given(method("GET"))
-        .and(path("/rest/v1/doctors"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
-            MockSupabaseResponses::doctor_profile_response(doctor_id)
-        ])))
-        .mount(&mock_server)
-        .await;
+    // Setup comprehensive mocks
+    setup_get_doctor_mocks(&mock_server, doctor_id).await;
 
     let request = Request::builder()
         .method("GET")
@@ -89,7 +77,14 @@ async fn test_get_doctor_public() {
     let response = app.oneshot(request).await.unwrap();
     
     assert_eq!(response.status(), StatusCode::OK);
+    
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json_response: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    
+    assert_eq!(json_response["id"], doctor_id);
+    assert_eq!(json_response["is_verified"], true);
 }
+
 
 #[tokio::test]
 async fn test_create_doctor_success() {
@@ -288,33 +283,23 @@ async fn test_get_doctor_availability_public() {
     let app = create_test_app(config.clone()).await;
     let doctor_id = "doctor-123";
     
-    // Mock Supabase availability response
-    Mock::given(method("GET"))
-        .and(path("/rest/v1/doctor_availability"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([{
-            "id": "availability-123",
-            "doctor_id": doctor_id,
-            "day_of_week": 1,
-            "start_time": "09:00:00",
-            "end_time": "17:00:00",
-            "duration_minutes": 30,
-            "timezone": "UTC",
-            "appointment_type": "consultation",
-            "is_available": true,
-            "created_at": "2024-01-01T00:00:00Z"
-        }])))
-        .mount(&mock_server)
-        .await;
+    // Setup comprehensive mocks
+    setup_availability_mocks(&mock_server, doctor_id).await;
 
     let request = Request::builder()
         .method("GET")
-        .uri(&format!("/{}/availability", doctor_id))
+        .uri(&format!("/{}/availability?date=2024-12-25", doctor_id))
         .body(Body::empty())
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
     
     assert_eq!(response.status(), StatusCode::OK);
+    
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json_response: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    
+    assert!(json_response.is_array());
 }
 
 #[tokio::test]
@@ -469,4 +454,175 @@ async fn test_public_endpoints_accessible() {
         assert_ne!(response.status(), StatusCode::UNAUTHORIZED, 
                   "Public endpoint {} should be accessible", uri);
     }
+}
+
+/// COMPREHENSIVE: Create a complete doctor response for mocks
+fn create_complete_doctor_response(id: &str, email: &str, name: &str, specialty: &str) -> serde_json::Value {
+    json!({
+        "id": id,
+        "full_name": name,
+        "email": email,
+        "specialty": specialty,
+        "bio": format!("Experienced {} practitioner", specialty),
+        "years_experience": 10,
+        "rating": 4.5,
+        "total_consultations": 150,
+        "is_available": true,
+        "is_verified": true,
+        "phone_number": "+1234567890",
+        "license_number": "LIC123456",
+        "medical_school": "Medical University",
+        "residency": "General Hospital",
+        "certifications": [specialty],
+        "languages": ["English"],
+        "profile_image_url": null,
+        "available_days": [1, 2, 3, 4, 5],
+        "created_at": "2024-01-01T00:00:00Z"
+    })
+}
+
+/// COMPREHENSIVE: Setup all required mocks for doctor search
+async fn setup_search_mocks(mock_server: &MockServer) {
+    // Mock general doctor search
+    Mock::given(method("GET"))
+        .and(path("/rest/v1/doctors"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            create_complete_doctor_response("doctor-1", "doc1@example.com", "Dr. John Smith", "Cardiology"),
+            create_complete_doctor_response("doctor-2", "doc2@example.com", "Dr. Jane Doe", "Cardiology")
+        ])))
+        .mount(mock_server)
+        .await;
+}
+
+/// COMPREHENSIVE: Setup all required mocks for getting a specific doctor
+async fn setup_get_doctor_mocks(mock_server: &MockServer, doctor_id: &str) {
+    // Mock get specific doctor
+    Mock::given(method("GET"))
+        .and(path("/rest/v1/doctors"))
+        .and(query_param("id", format!("eq.{}", doctor_id)))
+        .and(query_param("is_verified", "eq.true"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            create_complete_doctor_response(doctor_id, "doctor@example.com", "Dr. Test Doctor", "General Medicine")
+        ])))
+        .mount(mock_server)
+        .await;
+}
+
+/// COMPREHENSIVE: Setup mocks for doctor availability
+async fn setup_availability_mocks(mock_server: &MockServer, doctor_id: &str) {
+    // Mock doctor verification first
+    setup_get_doctor_mocks(mock_server, doctor_id).await;
+
+    // Mock availability slots
+    Mock::given(method("GET"))
+        .and(path("/rest/v1/appointment_availabilities"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {
+                "id": Uuid::new_v4().to_string(),
+                "doctor_id": doctor_id,
+                "day_of_week": 1,
+                "start_time": "09:00:00",
+                "end_time": "17:00:00",
+                "duration_minutes": 30,
+                "is_available": true,
+                "appointment_type": "consultation",
+                "created_at": "2024-01-01T00:00:00Z"
+            }
+        ])))
+        .mount(mock_server)
+        .await;
+}
+
+/// COMPREHENSIVE: Setup mocks for doctor specialties
+async fn setup_specialties_mocks(mock_server: &MockServer, doctor_id: &str) {
+    // Mock doctor verification first
+    setup_get_doctor_mocks(mock_server, doctor_id).await;
+
+    // Mock specialties
+    Mock::given(method("GET"))
+        .and(path("/rest/v1/doctor_specialties"))
+        .and(query_param("doctor_id", format!("eq.{}", doctor_id)))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {
+                "id": Uuid::new_v4().to_string(),
+                "doctor_id": doctor_id,
+                "specialty_name": "Cardiology",
+                "certification_date": "2020-01-01",
+                "is_primary": true,
+                "created_at": "2024-01-01T00:00:00Z"
+            }
+        ])))
+        .mount(mock_server)
+        .await;
+}
+
+/// COMPREHENSIVE: Setup authenticated operation mocks
+async fn setup_authenticated_mocks(mock_server: &MockServer, doctor_id: &str, user_id: &str) {
+    // Mock doctor operations for authenticated users
+    Mock::given(method("POST"))
+        .and(path("/rest/v1/doctors"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!([
+            create_complete_doctor_response(doctor_id, "newdoc@example.com", "Dr. New Doctor", "General Medicine")
+        ])))
+        .mount(mock_server)
+        .await;
+
+    // Mock doctor updates
+    Mock::given(method("PATCH"))
+        .and(path("/rest/v1/doctors"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            create_complete_doctor_response(doctor_id, "updated@example.com", "Dr. Updated Doctor", "General Medicine")
+        ])))
+        .mount(mock_server)
+        .await;
+
+    // Mock availability creation
+    Mock::given(method("POST"))
+        .and(path("/rest/v1/appointment_availabilities"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!([
+            {
+                "id": Uuid::new_v4().to_string(),
+                "doctor_id": doctor_id,
+                "day_of_week": 1,
+                "start_time": "09:00:00",
+                "end_time": "17:00:00",
+                "duration_minutes": 30,
+                "is_available": true,
+                "appointment_type": "consultation",
+                "created_at": "2024-01-01T00:00:00Z"
+            }
+        ])))
+        .mount(mock_server)
+        .await;
+
+    // Mock patient info for matching services
+    Mock::given(method("GET"))
+        .and(path("/rest/v1/patients"))
+        .and(query_param("id", format!("eq.{}", user_id)))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([{
+            "id": user_id,
+            "full_name": "Test Patient",
+            "date_of_birth": "1990-01-01",
+            "gender": "male",
+            "email": "patient@example.com",
+            "phone_number": "+1234567890",
+            "address": "123 Test Street",
+            "eircode": "D01 A1B2",
+            "allergies": null,
+            "chronic_conditions": [],
+            "current_medications": null,
+            "smoking_status": "never",
+            "alcohol_use": "occasional",
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-01T00:00:00Z"
+        }])))
+        .mount(mock_server)
+        .await;
+
+    // Mock appointment history
+    Mock::given(method("GET"))
+        .and(path("/rest/v1/appointments"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(mock_server)
+        .await;
 }

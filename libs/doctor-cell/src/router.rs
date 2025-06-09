@@ -14,12 +14,11 @@ use crate::handlers;
 pub fn doctor_routes(state: Arc<AppConfig>) -> Router {
     // Public routes (no authentication required)
     let public_routes = Router::new()
-        // Public doctor search and viewing - NO PRICING INFO
-        .route("/search", get(handlers::search_doctors))
-        .route("/{doctor_id}", get(handlers::get_doctor))
-        .route("/{doctor_id}/specialties", get(handlers::get_doctor_specialties))
-        .route("/{doctor_id}/availability", get(handlers::get_doctor_availability))
-        .route("/{doctor_id}/available-slots", get(handlers::get_available_slots));
+        .route("/search", get(handlers::search_doctors_public))
+        .route("/{doctor_id}", get(handlers::get_doctor_public))
+        .route("/{doctor_id}/specialties", get(handlers::get_doctor_specialties_public))
+        .route("/{doctor_id}/availability", get(handlers::get_doctor_availability_public))
+        .route("/{doctor_id}/available-slots", get(handlers::get_available_slots_public));
 
     // Protected routes (authentication required)
     let protected_routes = Router::new()
@@ -43,6 +42,11 @@ pub fn doctor_routes(state: Arc<AppConfig>) -> Router {
         .route("/matching/find", get(handlers::find_matching_doctors))
         .route("/matching/best", post(handlers::find_best_doctor))
         .route("/recommendations", get(handlers::get_recommended_doctors))
+
+        // Authenticated versions of search/get for full access
+        .route("/auth/search", get(handlers::search_doctors))  // Full authenticated search
+        .route("/auth/{doctor_id}", get(handlers::get_doctor))  // Full authenticated get
+        .route("/auth/{doctor_id}/available-slots", get(handlers::get_available_slots))  // Authenticated slots
         
         .layer(middleware::from_fn_with_state(state.clone(), auth_middleware));
 

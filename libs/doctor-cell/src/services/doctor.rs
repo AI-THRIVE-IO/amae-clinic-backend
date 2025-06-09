@@ -2,7 +2,7 @@ use anyhow::{Result, anyhow};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use reqwest::Method;
 use serde_json::{json, Value};
-use tracing::debug;
+use tracing::{debug, error};
 use uuid::Uuid;
 use chrono::Utc;
 
@@ -12,7 +12,7 @@ use shared_database::supabase::SupabaseClient;
 use crate::models::{
     Doctor, DoctorSpecialty, DoctorStats, DoctorSearchFilters,
     CreateDoctorRequest, UpdateDoctorRequest, CreateSpecialtyRequest,
-    DoctorImageUpload, AvailableSlot
+    DoctorImageUpload, AvailableSlot, DoctorError
 };
 
 pub struct DoctorService {
@@ -491,4 +491,127 @@ impl DoctorService {
         
         valid_timezones.contains(&timezone)
     }
+
+    //
+    //  PUBLIC API METHODS
+    //
+
+        /// PUBLIC: Search doctors without authentication (using anon key)
+        pub async fn search_doctors_public(
+            &self,
+            filters: DoctorSearchFilters,
+            limit: Option<i32>,
+            offset: Option<i32>,
+        ) -> Result<Vec<Doctor>, DoctorError> {
+            debug!("Searching doctors (public) with filters: {:?}", filters);
+
+            let mut query_parts = vec![
+                "is_available=eq.true".to_string(),
+                "is_verified=eq.true".to_string(), // Only show verified doctors in public search
+            ];
+
+            // Apply filters
+            if let Some(specialty) = filters.specialty {
+                query_parts.push(format!("specialty=ilike.%{}%", specialty));
+            }
+            if let Some(min_rating) = filters.min_rating {
+                query_parts.push(format!("rating=gte.{}", min_rating));
+            }
+            if let Some(min_exp) = filters.min_experience {
+                query_parts.push(format!("years_experience=gte.{}", min_exp));
+            }
+
+            let mut path = format!("/rest/v1/doctors?{}&order=rating.desc,total_consultations.desc", 
+                                query_parts.join("&"));
+
+            if let Some(limit_val) = limit {
+                path.push_str(&format!("&limit={}", limit_val));
+            }
+            if let Some(offset_val) = offset {
+                path.push_str(&format!("&offset={}", offset_val));
+            }
+
+            // Use anon key for public access
+            let result: Vec<Value> = self.supabase.request(
+                Method::GET,
+                &path,
+                None, // No auth token - uses anon key
+                None,
+            ).await.map_err(|e| {
+                error!("Failed to search doctors (public): {}", e);
+                DoctorError::ValidationError(e.to_string())
+            })?;
+
+            let doctors: Vec<Doctor> = result.into_iter()
+                .map(|doc| serde_json::from_value(doc))
+                .collect::<Result<Vec<Doctor>, _>>()
+                .map_err(|e| {
+                    error!("Failed to parse doctors: {}", e);
+                    DoctorError::ValidationError(format!("Failed to parse doctors: {}", e))
+                })?;
+
+            debug!("Found {} doctors in public search", doctors.len());
+            Ok(doctors)
+        }
+
+        /// PUBLIC: Get doctor by ID without authentication
+        pub async fn get_doctor_public(&self, doctor_id: &str) -> Result<Doctor, DoctorError> {
+            debug!("Getting doctor (public): {}", doctor_id);
+
+            let path = format!("/rest/v1/doctors?id=eq.{}&is_verified=eq.true", doctor_id);
+
+            let result: Vec<Value> = self.supabase.request(
+                Method::GET,
+                &path,
+                None, // No auth token
+                None,
+            ).await.map_err(|e| {
+                error!("Failed to get doctor (public): {}", e);
+                DoctorError::ValidationError(e.to_string())
+            })?;
+
+            if result.is_empty() {
+                return Err(DoctorError::NotFound);
+            }
+
+            let doctor: Doctor = serde_json::from_value(result.into_iter().next().unwrap())
+                .map_err(|e| {
+                    error!("Failed to parse doctor: {}", e);
+                    DoctorError::ValidationError(format!("Failed to parse doctor: {}", e))
+                })?;
+
+            debug!("Successfully retrieved doctor (public): {}", doctor_id);
+            Ok(doctor)
+        }
+
+        /// PUBLIC: Get doctor specialties without authentication
+        pub async fn get_doctor_specialties_public(&self, doctor_id: &str) -> Result<Vec<DoctorSpecialty>, DoctorError> {
+            debug!("Getting doctor specialties (public): {}", doctor_id);
+
+            // First verify doctor exists and is verified
+            self.get_doctor_public(doctor_id).await?;
+
+            let path = format!("/rest/v1/doctor_specialties?doctor_id=eq.{}", doctor_id);
+
+            let result: Vec<Value> = self.supabase.request(
+                Method::GET,
+                &path,
+                None, // No auth token
+                None,
+            ).await.map_err(|e| {
+                error!("Failed to get doctor specialties (public): {}", e);
+                DoctorError::ValidationError(e.to_string())
+            })?;
+
+            let specialties: Vec<DoctorSpecialty> = result.into_iter()
+                .map(|spec| serde_json::from_value(spec))
+                .collect::<Result<Vec<DoctorSpecialty>, _>>()
+                .map_err(|e| {
+                    error!("Failed to parse specialties: {}", e);
+                    DoctorError::ValidationError(format!("Failed to parse specialties: {}", e))
+                })?;
+
+            debug!("Found {} specialties for doctor (public): {}", specialties.len(), doctor_id);
+            Ok(specialties)
+        }
 }
