@@ -129,19 +129,32 @@ async fn setup_create_availability_mocks(mock_server: &MockServer, doctor_id: &s
 }
 
 async fn setup_matching_service_mocks(mock_server: &MockServer, user_id: &str, specialty: Option<&str>) {
-    // CORRECT: validate_specialty_availability call
+    println!("🔧 [DEBUG] Setting up mocks for user_id: {}, specialty: {:?}", user_id, specialty);
+    println!("🔧 [DEBUG] Mock server URL: {}", mock_server.uri());
+
+    // STEP 1: validate_specialty_availability call (if specialty is provided)
     if let Some(specialty_name) = specialty {
+        println!("🔧 [DEBUG] Creating validation mock for specialty: {}", specialty_name);
+        
         Mock::given(method("GET"))
             .and(path("/rest/v1/doctors"))
-            .and(query_param_contains("specialty", specialty_name))
+            .and(query_param("is_available", "eq.true"))
+            .and(query_param("specialty", format!("ilike.%{}%", specialty_name)))
+            .and(query_param("is_verified", "eq.true"))
+            .and(query_param("order", "rating.desc,total_consultations.desc"))
+            .and(query_param("limit", "1"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!([
                 create_complete_doctor_response(&Uuid::new_v4().to_string(), "specialist@example.com", "Dr. Specialist", specialty_name)
             ])))
+            .named("validate_specialty_mock")
+            .expect(1)
             .mount(mock_server)
             .await;
     }
 
-    // CORRECT: get_patient_info call - uses auth service
+    // STEP 2: get_patient_info call (auth service)
+    println!("🔧 [DEBUG] Creating get_patient_info mock for user: {}", user_id);
+    
     Mock::given(method("GET"))
         .and(path("/auth/v1/user"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
@@ -149,10 +162,14 @@ async fn setup_matching_service_mocks(mock_server: &MockServer, user_id: &str, s
             "email": "patient@example.com",
             "user_metadata": {"timezone": "UTC"}
         })))
+        .named("get_patient_info_mock")
+        .expect(1)
         .mount(mock_server)
         .await;
 
-    // CORRECT: get_patient_appointment_history call  
+    // STEP 3: get_patient_appointment_history call
+    println!("🔧 [DEBUG] Creating appointment history mock for patient: {}", user_id);
+    
     Mock::given(method("GET"))
         .and(path("/rest/v1/appointments"))
         .and(query_param("patient_id", format!("eq.{}", user_id)))
@@ -160,35 +177,93 @@ async fn setup_matching_service_mocks(mock_server: &MockServer, user_id: &str, s
         .and(query_param("order", "created_at.desc"))
         .and(query_param("limit", "50"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .named("appointment_history_mock")
+        .expect(1)
         .mount(mock_server)
         .await;
 
-    // CORRECT: doctor_service.search_doctors call
-    Mock::given(method("GET"))
-        .and(path("/rest/v1/doctors"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
-            create_complete_doctor_response(&Uuid::new_v4().to_string(), "doctor1@example.com", "Dr. Available", "General Practice"),
-            create_complete_doctor_response(&Uuid::new_v4().to_string(), "doctor2@example.com", "Dr. Specialist", specialty.unwrap_or("Cardiology"))
-        ])))
-        .mount(mock_server)
-        .await;
+    // STEP 4: main search_doctors call
+    if let Some(specialty_name) = specialty {
+        println!("🔧 [DEBUG] Creating main search mock WITH specialty: {}", specialty_name);
+        
+        Mock::given(method("GET"))
+            .and(path("/rest/v1/doctors"))
+            .and(query_param("is_available", "eq.true"))
+            .and(query_param("specialty", format!("ilike.%{}%", specialty_name)))
+            .and(query_param("rating", "gte.3"))
+            .and(query_param("is_verified", "eq.true"))
+            .and(query_param("order", "rating.desc,total_consultations.desc"))
+            .and(query_param("limit", "50"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+                create_complete_doctor_response(&Uuid::new_v4().to_string(), "doctor1@example.com", "Dr. Primary", specialty_name),
+                create_complete_doctor_response(&Uuid::new_v4().to_string(), "doctor2@example.com", "Dr. Secondary", specialty_name)
+            ])))
+            .named("main_search_with_specialty_mock")
+            .expect(1)
+            .mount(mock_server)
+            .await;
+    } else {
+        println!("🔧 [DEBUG] Creating main search mock WITHOUT specialty");
+        
+        Mock::given(method("GET"))
+            .and(path("/rest/v1/doctors"))
+            .and(query_param("is_available", "eq.true"))
+            .and(query_param("rating", "gte.3"))
+            .and(query_param("is_verified", "eq.true"))
+            .and(query_param("order", "rating.desc,total_consultations.desc"))
+            .and(query_param("limit", "50"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+                create_complete_doctor_response(&Uuid::new_v4().to_string(), "doctor1@example.com", "Dr. Primary", "General Medicine"),
+                create_complete_doctor_response(&Uuid::new_v4().to_string(), "doctor2@example.com", "Dr. Secondary", "Internal Medicine")
+            ])))
+            .named("main_search_no_specialty_mock")
+            .expect(1)
+            .mount(mock_server)
+            .await;
+    }
 
-    // CORRECT: availability_service.get_available_slots calls use appointment_availabilities table
-    Mock::given(method("GET"))
-        .and(path("/rest/v1/appointment_availabilities"))
-        .and(query_param_contains("doctor_id", "eq."))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
-            create_complete_availability_response(&Uuid::new_v4().to_string(), &Uuid::new_v4().to_string(), 1)
-        ])))
-        .mount(mock_server)
-        .await;
-
-    Mock::given(method("GET"))
-        .and(path("/rest/v1/doctor_availability_overrides"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
-        .mount(mock_server)
-        .await;
+    println!("✅ [DEBUG] All mocks created successfully");
 }
+
+#[allow(dead_code)]
+async fn debug_mock_server_requests(mock_server: &MockServer) {
+    println!("🔍 [DEBUG] Mock server received these requests:");
+    // Add request logging if available in wiremock version
+    println!("🔍 [DEBUG] Check if requests are reaching the mock server");
+}
+
+#[tokio::test]
+async fn test_mock_server_basic_functionality() {
+    let mock_server = MockServer::start().await;
+    
+    println!("🧪 [BASIC TEST] Mock server URL: {}", mock_server.uri());
+    
+    // Create a very simple mock
+    Mock::given(method("GET"))
+        .and(path("/test"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"test": "success"})))
+        .mount(&mock_server)
+        .await;
+    
+    // Make a direct HTTP request to the mock server
+    let client = reqwest::Client::new();
+    let response = client
+        .get(format!("{}/test", mock_server.uri()))
+        .send()
+        .await
+        .unwrap();
+    
+    println!("🧪 [BASIC TEST] Response status: {}", response.status());
+    
+    assert_eq!(response.status(), 200);
+    
+    let json: serde_json::Value = response.json().await.unwrap();
+    println!("🧪 [BASIC TEST] Response body: {:?}", json);
+    
+    assert_eq!(json["test"], "success");
+    println!("✅ [BASIC TEST] Mock server is working correctly!");
+}
+
 
 // ==============================================================================
 // PASSING TESTS (NO CHANGES NEEDED)
