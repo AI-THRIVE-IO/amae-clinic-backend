@@ -250,11 +250,8 @@ async fn setup_matching_service_mocks(mock_server: &MockServer, user_id: &str, s
 #[tokio::test]
 async fn test_debug_actual_requests() {
     let mock_server = MockServer::start().await;
-    let config = AppConfig {
-        supabase_url: mock_server.uri(),
-        supabase_anon_key: "test-anon-key".to_string(),
-        supabase_jwt_secret: "test-secret-key-for-jwt-validation-must-be-long-enough".to_string(),
-    };
+    let mut config = create_test_config();
+    config.supabase_url = mock_server.uri();
     
     let user = TestUser::patient("patient@example.com");
     let token = JwtTestUtils::create_test_token(&user, &config.supabase_jwt_secret, Some(24));
@@ -350,11 +347,8 @@ async fn test_mock_server_basic_functionality() {
 #[tokio::test]
 async fn test_create_doctor_success() {
     let mock_server = MockServer::start().await;
-    let config = AppConfig {
-        supabase_url: mock_server.uri(),
-        supabase_anon_key: "test-anon-key".to_string(),
-        supabase_jwt_secret: "test-secret-key-for-jwt-validation-must-be-long-enough".to_string(),
-    };
+    let mut config = create_test_config();
+    config.supabase_url = mock_server.uri();
     
     let admin_user = TestUser::admin("admin@example.com");
     let token = JwtTestUtils::create_test_token(&admin_user, &config.supabase_jwt_secret, Some(24));
@@ -432,11 +426,8 @@ async fn test_create_doctor_unauthorized() {
 #[tokio::test]
 async fn test_get_doctor_success() {
     let mock_server = MockServer::start().await;
-    let config = AppConfig {
-        supabase_url: mock_server.uri(),
-        supabase_anon_key: "test-anon-key".to_string(),
-        supabase_jwt_secret: "test-secret-key-for-jwt-validation-must-be-long-enough".to_string(),
-    };
+    let mut config = create_test_config();
+    config.supabase_url = mock_server.uri();
     
     let user = TestUser::patient("patient@example.com");
     let token = JwtTestUtils::create_test_token(&user, &config.supabase_jwt_secret, Some(24));
@@ -463,11 +454,8 @@ async fn test_get_doctor_success() {
 #[tokio::test]
 async fn test_update_doctor_as_self() {
     let mock_server = MockServer::start().await;
-    let config = AppConfig {
-        supabase_url: mock_server.uri(),
-        supabase_anon_key: "test-anon-key".to_string(),
-        supabase_jwt_secret: "test-secret-key-for-jwt-validation-must-be-long-enough".to_string(),
-    };
+    let mut config = create_test_config();
+    config.supabase_url = mock_server.uri();
     
     let doctor_user = TestUser::doctor("doctor@example.com");
     let token = JwtTestUtils::create_test_token(&doctor_user, &config.supabase_jwt_secret, Some(24));
@@ -536,11 +524,8 @@ async fn test_update_doctor_unauthorized() {
 #[tokio::test]
 async fn test_verify_doctor_as_admin() {
     let mock_server = MockServer::start().await;
-    let config = AppConfig {
-        supabase_url: mock_server.uri(),
-        supabase_anon_key: "test-anon-key".to_string(),
-        supabase_jwt_secret: "test-secret-key-for-jwt-validation-must-be-long-enough".to_string(),
-    };
+    let mut config = create_test_config();
+    config.supabase_url = mock_server.uri();
     
     let admin_user = TestUser::admin("admin@example.com");
     let token = JwtTestUtils::create_test_token(&admin_user, &config.supabase_jwt_secret, Some(24));
@@ -592,11 +577,8 @@ async fn test_verify_doctor_unauthorized() {
 #[tokio::test]
 async fn test_search_doctors_with_filters() {
     let mock_server = MockServer::start().await;
-    let config = AppConfig {
-        supabase_url: mock_server.uri(),
-        supabase_anon_key: "test-anon-key".to_string(),
-        supabase_jwt_secret: "test-secret-key-for-jwt-validation-must-be-long-enough".to_string(),
-    };
+    let mut config = create_test_config();
+    config.supabase_url = mock_server.uri();
     
     let user = TestUser::patient("patient@example.com");
     let token = JwtTestUtils::create_test_token(&user, &config.supabase_jwt_secret, Some(24));
@@ -637,11 +619,8 @@ async fn test_search_doctors_with_filters() {
 #[tokio::test]
 async fn test_get_available_slots() {
     let mock_server = MockServer::start().await;
-    let config = AppConfig {
-        supabase_url: mock_server.uri(),
-        supabase_anon_key: "test-anon-key".to_string(),
-        supabase_jwt_secret: "test-secret-key-for-jwt-validation-must-be-long-enough".to_string(),
-    };
+    let mut config = create_test_config();
+    config.supabase_url = mock_server.uri();
     
     let user = TestUser::patient("patient@example.com");
     let token = JwtTestUtils::create_test_token(&user, &config.supabase_jwt_secret, Some(24));
@@ -670,11 +649,8 @@ async fn test_get_available_slots() {
 #[tokio::test]
 async fn test_create_availability_as_doctor() {
     let mock_server = MockServer::start().await;
-    let config = AppConfig {
-        supabase_url: mock_server.uri(),
-        supabase_anon_key: "test-anon-key".to_string(),
-        supabase_jwt_secret: "test-secret-key-for-jwt-validation-must-be-long-enough".to_string(),
-    };
+    let mut config = create_test_config();
+    config.supabase_url = mock_server.uri();
     
     let doctor_user = TestUser::doctor("doctor@example.com");
     let token = JwtTestUtils::create_test_token(&doctor_user, &config.supabase_jwt_secret, Some(24));
@@ -747,11 +723,8 @@ async fn test_create_availability_unauthorized() {
 #[tokio::test]
 async fn test_find_matching_doctors_no_specialty() {
     let mock_server = MockServer::start().await;
-    let config = AppConfig {
-        supabase_url: mock_server.uri(),
-        supabase_anon_key: "test-anon-key".to_string(),
-        supabase_jwt_secret: "test-secret-key-for-jwt-validation-must-be-long-enough".to_string(),
-    };
+    let mut config = create_test_config();
+    config.supabase_url = mock_server.uri();
     
     let user = TestUser::patient("patient@example.com");
     let token = JwtTestUtils::create_test_token(&user, &config.supabase_jwt_secret, Some(24));

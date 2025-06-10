@@ -45,6 +45,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "video-conferencing-cell",
 ]
 
 [[package]]
@@ -2118,6 +2119,36 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "video-conferencing-cell"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "appointment-cell",
+ "assert_matches",
+ "async-trait",
+ "axum",
+ "axum-extra",
+ "chrono",
+ "headers",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "shared-config",
+ "shared-database",
+ "shared-models",
+ "shared-utils",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-test",
+ "tower",
+ "tower-http",
+ "tracing",
+ "uuid",
+ "wiremock",
+]
 
 [[package]]
 name = "want"

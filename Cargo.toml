@@ -10,6 +10,7 @@ members = [
     "libs/shared/utils",
     "libs/doctor-cell",
     "libs/appointment-cell",
+    "libs/video-conferencing-cell",
 ]
 
 [workspace.dependencies]
@@ -55,3 +56,4 @@ shared-utils = { path = "libs/shared/utils" }
 health-profile-cell = { path = "libs/health-profile-cell" }
 doctor-cell = { path = "libs/doctor-cell" }
 appointment-cell = { path = "libs/appointment-cell" }
+video-conferencing-cell = { path = "libs/video-conferencing-cell" }

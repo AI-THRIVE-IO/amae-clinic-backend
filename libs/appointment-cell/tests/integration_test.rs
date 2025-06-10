@@ -151,11 +151,9 @@ async fn test_book_appointment_success() {
     let mock_server = MockServer::start().await;
     
     let user = TestUser::patient("patient@example.com");
-    let config = AppConfig {
-        supabase_url: mock_server.uri(),
-        supabase_anon_key: "test-anon-key".to_string(),
-        supabase_jwt_secret: "test-secret-key-for-jwt-validation-must-be-long-enough".to_string(),
-    };
+    let test_config = TestConfig::default();
+    let mut config = test_config.to_app_config();
+    config.supabase_url = mock_server.uri();
     
     let app = create_test_app(config.clone()).await;
     let token = JwtTestUtils::create_test_token(&user, &config.supabase_jwt_secret, Some(24));
@@ -196,11 +194,9 @@ async fn test_smart_book_appointment_success() {
     let mock_server = MockServer::start().await;
     
     let user = TestUser::patient("patient@example.com");
-    let config = AppConfig {
-        supabase_url: mock_server.uri(),
-        supabase_anon_key: "test-anon-key".to_string(),
-        supabase_jwt_secret: "test-secret-key-for-jwt-validation-must-be-long-enough".to_string(),
-    };
+    let test_config = TestConfig::default();
+    let mut config = test_config.to_app_config();
+    config.supabase_url = mock_server.uri();
     
     let app = create_test_app(config.clone()).await;
     let token = JwtTestUtils::create_test_token(&user, &config.supabase_jwt_secret, Some(24));
@@ -245,11 +241,9 @@ async fn test_get_appointment_success() {
     let mock_server = MockServer::start().await;
     
     let user = TestUser::patient("patient@example.com");
-    let config = AppConfig {
-        supabase_url: mock_server.uri(),
-        supabase_anon_key: "test-anon-key".to_string(),
-        supabase_jwt_secret: "test-secret-key-for-jwt-validation-must-be-long-enough".to_string(),
-    };
+    let test_config = TestConfig::default();
+    let mut config = test_config.to_app_config();
+    config.supabase_url = mock_server.uri();
     
     let app = create_test_app(config.clone()).await;
     let token = JwtTestUtils::create_test_token(&user, &config.supabase_jwt_secret, Some(24));
@@ -308,11 +302,9 @@ async fn test_update_appointment_success() {
     let mock_server = MockServer::start().await;
     
     let user = TestUser::doctor("doctor@example.com");
-    let config = AppConfig {
-        supabase_url: mock_server.uri(),
-        supabase_anon_key: "test-anon-key".to_string(),
-        supabase_jwt_secret: "test-secret-key-for-jwt-validation-must-be-long-enough".to_string(),
-    };
+    let test_config = TestConfig::default();
+    let mut config = test_config.to_app_config();
+    config.supabase_url = mock_server.uri();
     
     let app = create_test_app(config.clone()).await;
     let token = JwtTestUtils::create_test_token(&user, &config.supabase_jwt_secret, Some(24));
@@ -388,11 +380,9 @@ async fn test_reschedule_appointment_success() {
     let mock_server = MockServer::start().await;
     
     let user = TestUser::patient("patient@example.com");
-    let config = AppConfig {
-        supabase_url: mock_server.uri(),
-        supabase_anon_key: "test-anon-key".to_string(),
-        supabase_jwt_secret: "test-secret-key-for-jwt-validation-must-be-long-enough".to_string(),
-    };
+    let test_config = TestConfig::default();
+    let mut config = test_config.to_app_config();
+    config.supabase_url = mock_server.uri();
     
     let app = create_test_app(config.clone()).await;
     let token = JwtTestUtils::create_test_token(&user, &config.supabase_jwt_secret, Some(24));
@@ -470,11 +460,9 @@ async fn test_cancel_appointment_success() {
     let mock_server = MockServer::start().await;
     
     let user = TestUser::patient("patient@example.com");
-    let config = AppConfig {
-        supabase_url: mock_server.uri(),
-        supabase_anon_key: "test-anon-key".to_string(),
-        supabase_jwt_secret: "test-secret-key-for-jwt-validation-must-be-long-enough".to_string(),
-    };
+    let test_config = TestConfig::default();
+    let mut config = test_config.to_app_config();
+    config.supabase_url = mock_server.uri();
     
     let app = create_test_app(config.clone()).await;
     let token = JwtTestUtils::create_test_token(&user, &config.supabase_jwt_secret, Some(24));
@@ -559,11 +547,9 @@ async fn test_get_upcoming_appointments_success() {
     let mock_server = MockServer::start().await;
     
     let user = TestUser::patient("patient@example.com");
-    let config = AppConfig {
-        supabase_url: mock_server.uri(),
-        supabase_anon_key: "test-anon-key".to_string(),
-        supabase_jwt_secret: "test-secret-key-for-jwt-validation-must-be-long-enough".to_string(),
-    };
+    let test_config = TestConfig::default();
+    let mut config = test_config.to_app_config();
+    config.supabase_url = mock_server.uri();
     
     let app = create_test_app(config.clone()).await;
     let token = JwtTestUtils::create_test_token(&user, &config.supabase_jwt_secret, Some(24));
@@ -614,11 +600,9 @@ async fn test_check_appointment_conflicts_success() {
     let mock_server = MockServer::start().await;
     
     let user = TestUser::doctor("doctor@example.com");
-    let config = AppConfig {
-        supabase_url: mock_server.uri(),
-        supabase_anon_key: "test-anon-key".to_string(),
-        supabase_jwt_secret: "test-secret-key-for-jwt-validation-must-be-long-enough".to_string(),
-    };
+    let test_config = TestConfig::default();
+    let mut config = test_config.to_app_config();
+    config.supabase_url = mock_server.uri();
     
     let app = create_test_app(config.clone()).await;
     let token = JwtTestUtils::create_test_token(&user, &config.supabase_jwt_secret, Some(24));
@@ -664,11 +648,9 @@ async fn test_get_appointment_stats_success() {
     let mock_server = MockServer::start().await;
     
     let user = TestUser::admin("admin@example.com");
-    let config = AppConfig {
-        supabase_url: mock_server.uri(),
-        supabase_anon_key: "test-anon-key".to_string(),
-        supabase_jwt_secret: "test-secret-key-for-jwt-validation-must-be-long-enough".to_string(),
-    };
+    let test_config = TestConfig::default();
+    let mut config = test_config.to_app_config();
+    config.supabase_url = mock_server.uri();
     
     let app = create_test_app(config.clone()).await;
     let token = JwtTestUtils::create_test_token(&user, &config.supabase_jwt_secret, Some(24));

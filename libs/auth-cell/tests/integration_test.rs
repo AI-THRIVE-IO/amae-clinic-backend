@@ -116,11 +116,9 @@ async fn test_get_profile_endpoint_success() {
     let mock_server = MockServer::start().await;
     
     let user = TestUser::patient("patient@example.com");
-    let config = AppConfig {
-        supabase_url: mock_server.uri(),
-        supabase_anon_key: "test-anon-key".to_string(),
-        supabase_jwt_secret: "test-secret-key-for-jwt-validation-must-be-long-enough".to_string(),
-    };
+    let test_config = TestConfig::default();
+    let mut config = test_config.to_app_config();
+    config.supabase_url = mock_server.uri();
     
     let app = create_test_app(config.clone()).await;
     let token = JwtTestUtils::create_test_token(&user, &config.supabase_jwt_secret, Some(24));
