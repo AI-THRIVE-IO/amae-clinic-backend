@@ -17,18 +17,18 @@
 //! 
 //! The video conferencing cell follows the established cell architecture pattern:
 //! 
-//! ```
-//! ┌─────────────────────────────────────────────────────┐
-//! │                   Video Cell                        │
-//! ├─────────────────────────────────────────────────────┤
-//! │  handlers.rs    │  HTTP endpoint handlers           │
-//! │  router.rs      │  Route definitions                │
-//! │  models.rs      │  Data structures & DTOs           │
-//! │  services/      │  Business logic layer             │
-//! │    cloudflare.rs│  Cloudflare Realtime API client   │
-//! │    session.rs   │  Video session management         │
-//! │    integration.rs│ Appointment system integration   │
-//! └─────────────────────────────────────────────────────┘
+//! ```text
+//! +-----------------------------------------------------+
+//! |                   Video Cell                        |
+//! +-----------------------------------------------------+
+//! |  handlers.rs    |  HTTP endpoint handlers           |
+//! |  router.rs      |  Route definitions                |
+//! |  models.rs      |  Data structures & DTOs           |
+//! |  services/      |  Business logic layer             |
+//! |    cloudflare.rs|  Cloudflare Realtime API client   |
+//! |    session.rs   |  Video session management         |
+//! |    integration.rs| Appointment system integration   |
+//! +-----------------------------------------------------+
 //! ```
 //! 
 //! ## API Endpoints
@@ -75,12 +75,22 @@
 //! 
 //! The video conferencing cell integrates seamlessly with the appointment system:
 //! 
-//! ```rust
+//! ```rust,no_run
 //! use video_conferencing_cell::services::VideoConferencingIntegrationService;
+//! use shared_config::AppConfig;
+//! use std::sync::Arc;
+//! use uuid::Uuid;
+//! 
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let config = Arc::new(AppConfig::from_env());
+//! let appointment_id = Uuid::new_v4();
+//! let token = "token";
 //! 
 //! // Automatically create video session when appointment is confirmed
 //! let integration = VideoConferencingIntegrationService::new(&config)?;
 //! integration.handle_appointment_status_change(appointment_id, "confirmed", token).await?;
+//! # Ok(())
+//! # }
 //! ```
 
 pub mod handlers;
