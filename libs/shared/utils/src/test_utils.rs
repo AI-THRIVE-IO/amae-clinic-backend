@@ -2,7 +2,7 @@ use std::sync::Arc;
 use chrono::{Duration, Utc};
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
-use base64::{Engine as _, engine::general_purpose};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -94,46 +94,65 @@ impl JwtTestUtils {
         let now = Utc::now();
         let exp = now + Duration::hours(exp_hours.unwrap_or(24));
         
+        // Create proper JWT header
         let header = json!({
             "alg": "HS256",
             "typ": "JWT"
         });
         
+        // Create proper JWT payload matching expected claims
         let payload = json!({
             "sub": user.id,
             "email": user.email,
             "role": user.role,
-            "iat": now.timestamp(),
-            "exp": exp.timestamp()
+            "iat": now.timestamp() as u64,
+            "exp": exp.timestamp() as u64,
+            "aud": "authenticated"
         });
         
-        let header_encoded = general_purpose::URL_SAFE_NO_PAD.encode(header.to_string());
-        let payload_encoded = general_purpose::URL_SAFE_NO_PAD.encode(payload.to_string());
+        // CRITICAL: Encode binary data, not JSON strings
+        let header_encoded = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&header).unwrap());
+        let payload_encoded = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&payload).unwrap());
         
+        // Create signing input
         let signing_input = format!("{}.{}", header_encoded, payload_encoded);
         
+        // Sign with HMAC-SHA256
         let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes())
-            .expect("HMAC can take key of any size");
+            .expect("Invalid JWT secret");
         mac.update(signing_input.as_bytes());
         let signature = mac.finalize().into_bytes();
-        let signature_encoded = general_purpose::URL_SAFE_NO_PAD.encode(signature);
         
-        format!("{}.{}", signing_input, signature_encoded)
+        // Encode signature
+        let signature_encoded = URL_SAFE_NO_PAD.encode(&signature);
+        
+        // Return complete JWT token
+        format!("{}.{}.{}", header_encoded, payload_encoded, signature_encoded)
     }
     
+    // Helper for creating expired tokens (for testing)
     pub fn create_expired_token(user: &TestUser, secret: &str) -> String {
-        Self::create_test_token(user, secret, Some(-1))
+        Self::create_test_token(user, secret, Some(-1)) // Expired 1 hour ago
     }
     
-    pub fn create_invalid_signature_token(user: &TestUser) -> String {
-        Self::create_test_token(user, "wrong-secret", Some(24))
-    }
-    
-    pub fn create_malformed_token() -> String {
-        "invalid.token.format".to_string()
+    // Helper for creating invalid signature tokens (for testing)
+    pub fn create_invalid_signature_token(user: &TestUser, _secret: &str) -> String {
+        let header = json!({"alg": "HS256", "typ": "JWT"});
+        let payload = json!({
+            "sub": user.id,
+            "email": user.email,
+            "role": user.role,
+            "iat": Utc::now().timestamp(),
+            "exp": (Utc::now() + Duration::hours(24)).timestamp()
+        });
+        
+        let header_encoded = URL_SAFE_NO_PAD.encode(header.to_string());
+        let payload_encoded = URL_SAFE_NO_PAD.encode(payload.to_string());
+        let invalid_signature = URL_SAFE_NO_PAD.encode("invalid_signature");
+        
+        format!("{}.{}.{}", header_encoded, payload_encoded, invalid_signature)
     }
 }
-
 pub struct MockSupabaseResponses;
 
 impl MockSupabaseResponses {
@@ -165,34 +184,113 @@ impl MockSupabaseResponses {
         })
     }
     
-    pub fn doctor_profile_response(user_id: &str) -> serde_json::Value {
+    pub fn doctor_response(id: &str, email: &str, name: &str, specialty: &str) -> serde_json::Value {
         json!({
-            "id": Uuid::new_v4(),
-            "user_id": user_id,
-            "specialty": "General Practice",
-            "license_number": "MD123456",
-            "experience_years": 10,
-            "education": "Medical University",
-            "certifications": ["Board Certified"],
-            "languages": ["English", "Spanish"],
-            "bio": "Experienced general practitioner",
-            "consultation_fee": 150.00,
+            "id": id,
+            "full_name": name,
+            "email": email,
+            "specialty": specialty,
+            "bio": format!("Experienced {} practitioner", specialty),
+            "years_experience": 10,
+            "rating": 4.5,
+            "total_consultations": 150,
+            "is_available": true,
+            "is_verified": true,
+            "timezone": "UTC",
+            "phone_number": "+1234567890",
+            "license_number": "LIC123456",
+            "medical_school": "Medical University",
+            "residency": "General Hospital",
+            "certifications": [specialty],
+            "languages": ["English"],
+            "profile_image_url": null,
+            "available_days": [1, 2, 3, 4, 5],
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-01T00:00:00Z"
+        })
+    }
+    
+    pub fn availability_response(id: &str, doctor_id: &str, day: i32) -> serde_json::Value {
+        json!({
+            "id": id,
+            "doctor_id": doctor_id,
+            "day_of_week": day,
+            "start_time": "09:00:00",
+            "end_time": "17:00:00",
+            "duration_minutes": 30,
+            "timezone": "UTC",
+            "appointment_type": "consultation",
+            "buffer_minutes": 0,
+            "max_concurrent_appointments": 1,
+            "is_recurring": true,
+            "specific_date": null,
             "is_available": true,
             "created_at": "2024-01-01T00:00:00Z",
             "updated_at": "2024-01-01T00:00:00Z"
         })
     }
     
-    pub fn appointment_response(user_id: &str, doctor_id: &str) -> serde_json::Value {
+     pub fn patient_response(id: &str, email: &str, name: &str) -> serde_json::Value {
         json!({
-            "id": Uuid::new_v4(),
-            "patient_id": user_id,
+            "id": id,
+            "full_name": name,
+            "email": email,
+            "date_of_birth": "1990-01-01",
+            "gender": "male",
+            "phone_number": "+1234567890",
+            "address": "123 Test Street",
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-01T00:00:00Z"
+        })
+    }
+    
+    pub fn appointment_response(patient_id: &str, doctor_id: &str) -> serde_json::Value {
+        json!({
+            "id": uuid::Uuid::new_v4().to_string(),
+            "patient_id": patient_id,
             "doctor_id": doctor_id,
-            "scheduled_time": "2024-12-25T10:00:00Z",
+            "appointment_date": "2024-12-25T10:00:00Z",
+            "status": "confirmed",
+            "appointment_type": "general_consultation",
             "duration_minutes": 30,
-            "status": "scheduled",
-            "type": "consultation",
+            "timezone": "UTC",
+            "scheduled_start_time": "2024-12-25T10:00:00Z",
+            "scheduled_end_time": "2024-12-25T10:30:00Z",
+            "actual_start_time": null,
+            "actual_end_time": null,
             "notes": null,
+            "patient_notes": "First consultation",
+            "doctor_notes": null,
+            "prescription_issued": false,
+            "medical_certificate_issued": false,
+            "report_generated": false,
+            "video_conference_link": null,
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-01T00:00:00Z"
+        })
+    }
+    
+    pub fn doctor_profile_response(id: &str) -> serde_json::Value {
+        json!({
+            "id": id,
+            "full_name": format!("Dr. Test Doctor {}", id),
+            "email": format!("doctor{}@example.com", id),
+            "specialty": "General Medicine",
+            "bio": "Experienced physician",
+            "years_experience": 10,
+            "rating": 4.5,
+            "total_consultations": 150,
+            "is_available": true,
+            "is_verified": true,
+            "timezone": "UTC",
+            "phone_number": "+1234567890",
+            "license_number": "LIC123456",
+            "medical_school": "Medical University",
+            "residency": "General Hospital",
+            "certifications": ["General Medicine"],
+            "languages": ["English"],
+            "profile_image_url": null,
+            "available_days": [1, 2, 3, 4, 5],
             "created_at": "2024-01-01T00:00:00Z",
             "updated_at": "2024-01-01T00:00:00Z"
         })
