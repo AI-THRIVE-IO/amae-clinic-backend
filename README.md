@@ -61,6 +61,14 @@ Nx Console is an editor extension that enriches your developer experience. It le
 
 [Install Nx Console &raquo;](https://nx.dev/getting-started/editor-setup?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
 
+## Automatically set upstream when pushing new branches
+
+To have Git automatically set the upstream remote when pushing a new branch, add this to your global Git config:
+
+```sh
+git config --global push.autoSetupRemote true
+```
+
 ## Useful links
 
 Learn more:

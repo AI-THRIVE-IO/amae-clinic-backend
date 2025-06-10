@@ -19,3 +19,8 @@ tower = { workspace = true }
 
 shared-models = { workspace = true }
 shared-config = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+assert_matches = { workspace = true }

@@ -16,7 +16,10 @@ use crate::services::profile::HealthProfileService;
 use crate::services::avatar::AvatarService;
 use crate::services::document::DocumentService;
 use crate::services::ai::AiService;
-use crate::models::{UpdateHealthProfile, DocumentUpload, AvatarUpload, CarePlanRequest};
+use crate::models::{
+    UpdateHealthProfile, DocumentUpload, AvatarUpload, CarePlanRequest,
+    CreateHealthProfileRequest  // ✅ Import from models.rs
+};
 
 // Health Profile Handlers
 
@@ -87,20 +90,12 @@ pub async fn update_health_profile(
     Ok(Json(json!(updated_profile)))
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
-pub struct CreateHealthProfileRequest {
-    pub patient_id: String,
-    pub is_pregnant: Option<bool>,
-    pub is_breastfeeding: Option<bool>,
-    pub reproductive_stage: Option<String>,
-}
-
 #[axum::debug_handler]
 pub async fn create_health_profile(
     State(state): State<Arc<AppConfig>>,
     TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
     Extension(user): Extension<User>,
-    Json(payload): Json<CreateHealthProfileRequest>,
+    Json(payload): Json<CreateHealthProfileRequest>,  // ✅ Now uses the correct type from models.rs
 ) -> Result<Json<Value>, AppError> {
     let token = auth.token();
 
