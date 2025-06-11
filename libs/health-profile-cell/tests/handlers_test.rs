@@ -62,23 +62,49 @@ async fn test_create_health_profile_success() {
         reproductive_stage: Some("reproductive".to_string()),
     };
 
+    // Mock patient validation request (used by create_health_profile)
+    Mock::given(method("GET"))
+        .and(path("/rest/v1/patients"))
+        .and(query_param("id", format!("eq.{}", patient_user.id)))
+        .and(header("Authorization", format!("Bearer {}", token)))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([{
+            "id": patient_user.id,
+            "gender": "female",
+            "email": "patient@example.com"
+        }])))
+        .mount(&mock_server)
+        .await;
+
+    // Mock existing health profile check (should return empty to allow creation)
+    Mock::given(method("GET"))
+        .and(path("/rest/v1/health_profiles"))
+        .and(query_param("patient_id", format!("eq.{}", patient_user.id)))
+        .and(header("Authorization", format!("Bearer {}", token)))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&mock_server)
+        .await;
+
     // Mock health profile creation
     Mock::given(method("POST"))
         .and(path("/rest/v1/health_profiles"))
         .and(header("Authorization", format!("Bearer {}", token)))
-        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!([{
             "id": profile_id,
-            "user_id": patient_user.id,
-            "date_of_birth": "1990-05-15",
-            "gender": "Female",
-            "blood_type": "O+",
-            "height_cm": 165,
-            "weight_kg": 60.5,
-            "allergies": ["Peanuts", "Shellfish"],
-            "chronic_conditions": ["Asthma"],
-            "current_medications": ["Inhaler"],
-            "created_at": "2024-01-01T00:00:00Z"
-        })))
+            "patient_id": patient_user.id,
+            "blood_type": null,
+            "height_cm": null,
+            "weight_kg": null,
+            "bmi": null,
+            "allergies": null,
+            "chronic_conditions": null,
+            "medications": null,
+            "avatar_url": null,
+            "is_pregnant": false,
+            "is_breastfeeding": false,
+            "reproductive_stage": "reproductive",
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-01T00:00:00Z"
+        }])))
         .mount(&mock_server)
         .await;
 
@@ -91,9 +117,9 @@ async fn test_create_health_profile_success() {
 
     assert!(result.is_ok());
     let response = result.unwrap().0;
-    assert_eq!(response["user_id"], patient_user.id);
-    assert_eq!(response["gender"], "Female");
-    assert_eq!(response["blood_type"], "O+");
+    assert_eq!(response["patient_id"], patient_user.id);
+    assert_eq!(response["is_pregnant"], false);
+    assert_eq!(response["reproductive_stage"], "reproductive");
 }
 
 #[tokio::test]
@@ -108,18 +134,25 @@ async fn test_get_health_profile_success() {
     // Mock get health profile API call
     Mock::given(method("GET"))
         .and(path("/rest/v1/health_profiles"))
-        .and(query_param("user_id", format!("eq.{}", patient_user.id)))
+        .and(query_param("patient_id", format!("eq.{}", patient_user.id)))
         .and(header("Authorization", format!("Bearer {}", token)))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!([
             {
                 "id": Uuid::new_v4(),
-                "user_id": patient_user.id,
-                "date_of_birth": "1990-05-15",
-                "gender": "Female",
+                "patient_id": patient_user.id,
                 "blood_type": "O+",
-                "allergies": ["Peanuts"],
+                "height_cm": null,
+                "weight_kg": null,
+                "bmi": null,
+                "allergies": "Peanuts",
                 "chronic_conditions": ["Asthma"],
-                "created_at": "2024-01-01T00:00:00Z"
+                "medications": null,
+                "avatar_url": null,
+                "is_pregnant": null,
+                "is_breastfeeding": null,
+                "reproductive_stage": null,
+                "created_at": "2024-01-01T00:00:00Z",
+                "updated_at": "2024-01-01T00:00:00Z"
             }
         ])))
         .mount(&mock_server)
@@ -134,7 +167,7 @@ async fn test_get_health_profile_success() {
 
     assert!(result.is_ok());
     let response = result.unwrap().0;
-    assert_eq!(response["user_id"], patient_user.id);
+    assert_eq!(response["patient_id"], patient_user.id);
     assert_eq!(response["blood_type"], "O+");
 }
 
@@ -159,32 +192,69 @@ async fn test_update_health_profile_success() {
         reproductive_stage: Some("reproductive".to_string()),
     };
 
+    let profile_id = Uuid::new_v4();
+
     // Mock get existing profile for authorization
     Mock::given(method("GET"))
         .and(path("/rest/v1/health_profiles"))
-        .and(query_param("user_id", format!("eq.{}", patient_user.id)))
+        .and(query_param("patient_id", format!("eq.{}", patient_user.id)))
+        .and(header("Authorization", format!("Bearer {}", token)))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!([
             {
-                "id": Uuid::new_v4(),
-                "user_id": patient_user.id,
-                "gender": "Female"
+                "id": profile_id,
+                "patient_id": patient_user.id,
+                "blood_type": "O+",
+                "height_cm": null,
+                "weight_kg": null,
+                "bmi": null,
+                "allergies": null,
+                "chronic_conditions": null,
+                "medications": null,
+                "avatar_url": null,
+                "is_pregnant": null,
+                "is_breastfeeding": null,
+                "reproductive_stage": null,
+                "created_at": "2024-01-01T00:00:00Z",
+                "updated_at": "2024-01-01T00:00:00Z"
             }
         ])))
+        .mount(&mock_server)
+        .await;
+
+    // Mock patient validation request
+    Mock::given(method("GET"))
+        .and(path("/rest/v1/patients"))
+        .and(query_param("id", format!("eq.{}", patient_user.id)))
+        .and(header("Authorization", format!("Bearer {}", token)))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([{
+            "id": patient_user.id,
+            "gender": "female",
+            "email": "patient@example.com"
+        }])))
         .mount(&mock_server)
         .await;
 
     // Mock profile update
     Mock::given(method("PATCH"))
         .and(path("/rest/v1/health_profiles"))
-        .and(query_param("user_id", format!("eq.{}", patient_user.id)))
+        .and(query_param("id", format!("eq.{}", profile_id)))
+        .and(header("Authorization", format!("Bearer {}", token)))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!([
             {
-                "id": Uuid::new_v4(),
-                "user_id": patient_user.id,
-                "gender": "Male",
+                "id": profile_id,
+                "patient_id": patient_user.id,
                 "blood_type": "A+",
                 "height_cm": 180,
-                "weight_kg": 75.0,
+                "weight_kg": 75,
+                "bmi": 23.1,
+                "allergies": "Nuts",
+                "chronic_conditions": ["Hypertension"],
+                "medications": "Daily vitamin",
+                "avatar_url": null,
+                "is_pregnant": false,
+                "is_breastfeeding": false,
+                "reproductive_stage": "reproductive",
+                "created_at": "2024-01-01T00:00:00Z",
                 "updated_at": "2024-01-01T12:00:00Z"
             }
         ])))
@@ -201,8 +271,9 @@ async fn test_update_health_profile_success() {
 
     assert!(result.is_ok());
     let response = result.unwrap().0;
-    assert_eq!(response[0]["gender"], "Male");
-    assert_eq!(response[0]["blood_type"], "A+");
+    assert_eq!(response["patient_id"], patient_user.id);
+    assert_eq!(response["blood_type"], "A+");
+    assert_eq!(response["height_cm"], 180);
 }
 
 #[tokio::test]

@@ -14,6 +14,9 @@ pub struct HealthProfile {
     pub chronic_conditions: Option<Vec<String>>,
     pub medications: Option<String>,
     pub avatar_url: Option<String>,
+    pub is_pregnant: Option<bool>,
+    pub is_breastfeeding: Option<bool>,
+    pub reproductive_stage: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
