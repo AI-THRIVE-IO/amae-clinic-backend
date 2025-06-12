@@ -8,7 +8,7 @@ use tower::ServiceExt;
 use serde_json::json;
 use uuid;
 use wiremock::{MockServer, Mock, ResponseTemplate};
-use wiremock::matchers::{method, path, header, query_param};
+use wiremock::matchers::{method, path, path_regex, header, query_param};
 
 use health_profile_cell::router::health_profile_routes;
 use health_profile_cell::models::CreateHealthProfileRequest;
@@ -292,12 +292,26 @@ async fn test_upload_avatar_success() {
     let app = create_test_app(config.clone()).await;
     let token = JwtTestUtils::create_test_token(&user, &config.supabase_jwt_secret, Some(24));
     
-    // Mock any storage upload request - use a more general path matcher
+    // Mock storage upload request - specific path for avatar upload
     Mock::given(method("POST"))
+        .and(path_regex(r"^/storage/v1/object/profiles/avatars/.*"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "Key": "avatars/test-file",
+            "Key": format!("avatars/{}/test-file", user.id),
             "Id": "test-file-id"
         })))
+        .mount(&mock_server)
+        .await;
+
+    // Mock health profile update for avatar URL
+    Mock::given(method("PATCH"))
+        .and(path("/rest/v1/health_profiles"))
+        .and(query_param("patient_id", format!("eq.{}", user.id)))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([{
+            "id": uuid::Uuid::new_v4(),
+            "patient_id": user.id,
+            "avatar_url": format!("{}/storage/v1/object/public/profiles/avatars/{}/test-file", mock_server.uri(), user.id),
+            "updated_at": "2024-01-01T12:00:00Z"
+        }])))
         .mount(&mock_server)
         .await;
 
@@ -314,13 +328,24 @@ async fn test_upload_avatar_success() {
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
+    let status = response.status();
     
-    assert_eq!(response.status(), StatusCode::OK);
+    if status != StatusCode::OK {
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body_str = String::from_utf8(body.to_vec()).unwrap_or_else(|_| "Invalid UTF-8".to_string());
+        panic!("Expected 200, got {}: {}", status, body_str);
+    }
+    
+    assert_eq!(status, StatusCode::OK);
 }
 
 #[tokio::test]
 async fn test_generate_nutrition_plan_success() {
     let mock_server = MockServer::start().await;
+    
+    // Set environment variables for AI service
+    std::env::set_var("OPENAI_API_KEY", "test-api-key");
+    std::env::set_var("OPENAI_BASE_URL", &mock_server.uri());
     
     let user = TestUser::patient("patient@example.com");
     let test_config = TestConfig::default();
@@ -330,6 +355,24 @@ async fn test_generate_nutrition_plan_success() {
     let app = create_test_app(config.clone()).await;
     let token = JwtTestUtils::create_test_token(&user, &config.supabase_jwt_secret, Some(24));
     
+    // Mock patient fetch for AI service
+    Mock::given(method("GET"))
+        .and(path("/rest/v1/patients"))
+        .and(query_param("id", format!("eq.{}", user.id)))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([{
+            "id": user.id,
+            "full_name": "Test Patient",
+            "email": user.email,
+            "date_of_birth": "1990-01-01",
+            "gender": "female",
+            "phone_number": "+1234567890",
+            "address": "123 Test Street",
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-01T00:00:00Z"
+        }])))
+        .mount(&mock_server)
+        .await;
+
     // Mock health profile fetch
     Mock::given(method("GET"))
         .and(path("/rest/v1/health_profiles"))
@@ -354,6 +397,34 @@ async fn test_generate_nutrition_plan_success() {
         .mount(&mock_server)
         .await;
 
+    // Mock OpenAI API call
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "choices": [{
+                "message": {
+                    "content": "## Personalized Nutrition Plan\n\nGoal: Maintain optimal health with balanced nutrition.\n\n### Daily Recommendations:\n- 2000-2200 calories per day\n- 5-6 servings of fruits and vegetables\n- Lean proteins at each meal\n- Whole grains preferred\n\n### Foods to Include:\n- Leafy greens, berries, nuts\n- Fish, chicken, legumes\n- Quinoa, brown rice, oats\n\n### Foods to Limit:\n- Processed foods\n- Added sugars\n- Excess sodium"
+                }
+            }]
+        })))
+        .mount(&mock_server)
+        .await;
+
+    // Mock nutrition plan creation
+    Mock::given(method("POST"))
+        .and(path("/rest/v1/nutrition_plans"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!([{
+            "id": uuid::Uuid::new_v4(),
+            "patient_id": user.id,
+            "ai_generated": true,
+            "goal": "Maintain optimal health with balanced nutrition.",
+            "plan_details": "## Personalized Nutrition Plan...",
+            "created_at": "2024-01-01T00:00:00Z",
+            "last_updated": "2024-01-01T00:00:00Z"
+        }])))
+        .mount(&mock_server)
+        .await;
+
     let nutrition_request = json!({
         "patient_id": user.id
     });
@@ -367,8 +438,19 @@ async fn test_generate_nutrition_plan_success() {
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
+    let status = response.status();
     
-    assert_eq!(response.status(), StatusCode::OK);
+    if status != StatusCode::OK {
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body_str = String::from_utf8(body.to_vec()).unwrap_or_else(|_| "Invalid UTF-8".to_string());
+        panic!("Expected 200, got {}: {}", status, body_str);
+    }
+    
+    // Clean up environment variables
+    std::env::remove_var("OPENAI_API_KEY");
+    std::env::remove_var("OPENAI_BASE_URL");
+    
+    assert_eq!(status, StatusCode::OK);
 }
 
 #[tokio::test]

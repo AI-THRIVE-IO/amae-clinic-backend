@@ -344,4 +344,14 @@ mod tests {
         assert!(token.contains('.'));
         assert_eq!(token.split('.').count(), 3);
     }
+    
+    #[test]
+    fn test_app_config_has_cloudflare_fields() {
+        let config = TestConfig::default().to_app_config();
+        
+        // This test will fail to compile if the fields don't exist
+        assert!(!config.cloudflare_realtime_app_id.is_empty());
+        assert!(!config.cloudflare_realtime_api_token.is_empty());
+        assert!(!config.cloudflare_realtime_base_url.is_empty());
+    }
 }

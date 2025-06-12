@@ -11,6 +11,7 @@ use crate::models::{HealthProfile, CarePlanRequest, NutritionPlanRequest};
 
 pub struct AiService {
     openai_api_key: String,
+    openai_base_url: String,
     supabase: SupabaseClient,
     http_client: Client,
 }
@@ -20,8 +21,12 @@ impl AiService {
         let openai_api_key = env::var("OPENAI_API_KEY")
             .map_err(|_| anyhow!("OPENAI_API_KEY environment variable not set"))?;
         
+        let openai_base_url = env::var("OPENAI_BASE_URL")
+            .unwrap_or_else(|_| "https://api.openai.com".to_string());
+        
         Ok(Self {
             openai_api_key,
+            openai_base_url,
             supabase: SupabaseClient::new(config),
             http_client: Client::new(),
         })
@@ -113,7 +118,7 @@ impl AiService {
         });
         
         // Call OpenAI API
-        let response = self.http_client.post("https://api.openai.com/v1/chat/completions")
+        let response = self.http_client.post(&format!("{}/v1/chat/completions", self.openai_base_url))
             .header(header::AUTHORIZATION, format!("Bearer {}", self.openai_api_key))
             .header(header::CONTENT_TYPE, "application/json")
             .json(&prompt)
@@ -184,7 +189,7 @@ impl AiService {
         });
         
         // Call OpenAI API
-        let response = self.http_client.post("https://api.openai.com/v1/chat/completions")
+        let response = self.http_client.post(&format!("{}/v1/chat/completions", self.openai_base_url))
             .header(header::AUTHORIZATION, format!("Bearer {}", self.openai_api_key))
             .header(header::CONTENT_TYPE, "application/json")
             .json(&prompt)
