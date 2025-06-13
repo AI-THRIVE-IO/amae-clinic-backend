@@ -370,7 +370,8 @@ pub fn new(config: &AppConfig) -> Self {
 
             responses.push(DoctorAvailabilityResponse {
                 doctor_id: Uuid::parse_str(&doctor_id)?,
-                doctor_name: doctor_data["full_name"].as_str().unwrap_or("Unknown").to_string(),
+                doctor_first_name: doctor_data["first_name"].as_str().unwrap_or("Unknown").to_string(),
+                doctor_last_name: doctor_data["last_name"].as_str().unwrap_or("Doctor").to_string(),
                 specialty: doctor_data["specialty"].as_str().unwrap_or("General").to_string(),
                 available_slots,
                 timezone: doctor_data["timezone"].as_str().unwrap_or("UTC").to_string(),

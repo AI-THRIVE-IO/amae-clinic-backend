@@ -174,11 +174,18 @@ pub struct SmartBookingResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AlternativeSlot {
     pub doctor_id: Uuid,
-    pub doctor_name: String,
+    pub doctor_first_name: String,
+    pub doctor_last_name: String,
     pub start_time: DateTime<Utc>,
     pub end_time: DateTime<Utc>,
     pub match_score: f32,
     pub has_patient_history: bool,
+}
+
+impl AlternativeSlot {
+    pub fn doctor_full_name(&self) -> String {
+        format!("{} {}", self.doctor_first_name, self.doctor_last_name)
+    }
 }
 
 // ==============================================================================
@@ -215,12 +222,24 @@ pub struct SuggestedSlot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppointmentSummary {
     pub id: Uuid,
-    pub patient_name: String,
-    pub doctor_name: String,
+    pub patient_first_name: String,
+    pub patient_last_name: String,
+    pub doctor_first_name: String,
+    pub doctor_last_name: String,
     pub appointment_date: DateTime<Utc>,
     pub status: AppointmentStatus,
     pub appointment_type: AppointmentType,
     pub duration_minutes: i32,
+}
+
+impl AppointmentSummary {
+    pub fn patient_full_name(&self) -> String {
+        format!("{} {}", self.patient_first_name, self.patient_last_name)
+    }
+    
+    pub fn doctor_full_name(&self) -> String {
+        format!("{} {}", self.doctor_first_name, self.doctor_last_name)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

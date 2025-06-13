@@ -5,7 +5,8 @@ use chrono::{DateTime, Utc, NaiveTime, NaiveDate};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Doctor {
     pub id: Uuid,
-    pub full_name: String,
+    pub first_name: String,
+    pub last_name: String,
     pub email: String,
     pub specialty: String,
     pub bio: Option<String>,
@@ -17,8 +18,15 @@ pub struct Doctor {
     pub is_available: bool,
     pub rating: f32,
     pub total_consultations: i32,
+    pub date_of_birth: NaiveDate,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+impl Doctor {
+    pub fn full_name(&self) -> String {
+        format!("{} {}", self.first_name, self.last_name)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,23 +95,27 @@ pub struct DoctorSearchFilters {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateDoctorRequest {
-    pub full_name: String,
+    pub first_name: String,
+    pub last_name: String,
     pub email: String,
     pub specialty: String,
     pub bio: Option<String>,
     pub license_number: Option<String>,
     pub years_experience: Option<i32>,
     pub timezone: String,
+    pub date_of_birth: NaiveDate,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateDoctorRequest {
-    pub full_name: Option<String>,
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
     pub bio: Option<String>,
     pub specialty: Option<String>,
     pub years_experience: Option<i32>,
     pub timezone: Option<String>,
     pub is_available: Option<bool>,
+    pub date_of_birth: Option<NaiveDate>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -190,10 +202,17 @@ pub struct DoctorStats {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DoctorAvailabilityResponse {
     pub doctor_id: Uuid,
-    pub doctor_name: String,
+    pub doctor_first_name: String,
+    pub doctor_last_name: String,
     pub specialty: String,
     pub available_slots: Vec<AvailableSlot>,
     pub timezone: String,
+}
+
+impl DoctorAvailabilityResponse {
+    pub fn doctor_full_name(&self) -> String {
+        format!("{} {}", self.doctor_first_name, self.doctor_last_name)
+    }
 }
 
 // Request/Response DTOs for profile image upload

@@ -163,7 +163,8 @@ impl MockSupabaseResponses {
         json!({
             "id": user_id,
             "email": "test@example.com",
-            "full_name": "Test User",
+            "first_name": "Test",
+            "last_name": "User",
             "avatar_url": null,
             "phone": null,
             "created_at": "2024-01-01T00:00:00Z",
@@ -188,9 +189,17 @@ impl MockSupabaseResponses {
     }
     
     pub fn doctor_response(id: &str, email: &str, name: &str, specialty: &str) -> serde_json::Value {
+        let name_parts: Vec<&str> = name.split_whitespace().collect();
+        let (first_name, last_name) = if name_parts.len() >= 2 {
+            (name_parts[0], name_parts[1..].join(" "))
+        } else {
+            (name_parts.get(0).copied().unwrap_or("Doctor"), "User".to_string())
+        };
+        
         json!({
             "id": id,
-            "full_name": name,
+            "first_name": first_name,
+            "last_name": last_name,
             "email": email,
             "specialty": specialty,
             "bio": format!("Experienced {} practitioner", specialty),
@@ -208,6 +217,7 @@ impl MockSupabaseResponses {
             "languages": ["English"],
             "profile_image_url": null,
             "available_days": [1, 2, 3, 4, 5],
+            "date_of_birth": "1980-01-01",
             "created_at": "2024-01-01T00:00:00Z",
             "updated_at": "2024-01-01T00:00:00Z"
         })
@@ -234,9 +244,17 @@ impl MockSupabaseResponses {
     }
     
      pub fn patient_response(id: &str, email: &str, name: &str) -> serde_json::Value {
+        let name_parts: Vec<&str> = name.split_whitespace().collect();
+        let (first_name, last_name) = if name_parts.len() >= 2 {
+            (name_parts[0], name_parts[1..].join(" "))
+        } else {
+            (name_parts.get(0).copied().unwrap_or("Patient"), "User".to_string())
+        };
+        
         json!({
             "id": id,
-            "full_name": name,
+            "first_name": first_name,
+            "last_name": last_name,
             "email": email,
             "date_of_birth": "1990-01-01",
             "gender": "male",
@@ -276,7 +294,8 @@ impl MockSupabaseResponses {
     pub fn doctor_profile_response(id: &str) -> serde_json::Value {
         json!({
             "id": id,
-            "full_name": format!("Dr. Test Doctor {}", id),
+            "first_name": "Dr. Test",
+            "last_name": format!("Doctor {}", id),
             "email": format!("doctor{}@example.com", id),
             "specialty": "General Medicine",
             "bio": "Experienced physician",
@@ -294,6 +313,7 @@ impl MockSupabaseResponses {
             "languages": ["English"],
             "profile_image_url": null,
             "available_days": [1, 2, 3, 4, 5],
+            "date_of_birth": "1980-01-01",
             "created_at": "2024-01-01T00:00:00Z",
             "updated_at": "2024-01-01T00:00:00Z"
         })

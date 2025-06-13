@@ -38,9 +38,17 @@ fn create_auth_header(token: &str) -> TypedHeader<Authorization<Bearer>> {
 }
 
 fn create_complete_doctor_response(id: &str, email: &str, full_name: &str, specialty: &str) -> serde_json::Value {
+    let name_parts: Vec<&str> = full_name.split_whitespace().collect();
+    let (first_name, last_name) = if name_parts.len() >= 2 {
+        (name_parts[0], name_parts[1..].join(" "))
+    } else {
+        (name_parts.get(0).copied().unwrap_or("Doctor"), "User".to_string())
+    };
+    
     json!({
         "id": id,
-        "full_name": full_name,
+        "first_name": first_name,
+        "last_name": last_name,
         "email": email,
         "specialty": specialty,
         "bio": "Experienced physician",
@@ -51,6 +59,7 @@ fn create_complete_doctor_response(id: &str, email: &str, full_name: &str, speci
         "is_available": true,
         "rating": 4.5,
         "total_consultations": 150,
+        "date_of_birth": "1980-01-01",
         "created_at": Utc::now().to_rfc3339(),
         "updated_at": Utc::now().to_rfc3339()
     })
@@ -155,7 +164,8 @@ async fn setup_matching_service_mocks(mock_server: &MockServer, user_id: &str, s
         .and(query_param("id", format!("eq.{}", user_id)))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!([{
             "id": user_id,
-            "full_name": "Test Patient",
+            "first_name": "Test",
+            "last_name": "Patient",
             "date_of_birth": "1990-01-01",
             "gender": "male",
             "email": "patient@example.com",
@@ -355,13 +365,15 @@ async fn test_create_doctor_success() {
     let doctor_id = Uuid::new_v4().to_string();
     
     let request = CreateDoctorRequest {
-        full_name: "Dr. John Smith".to_string(),
+        first_name: "Dr. John".to_string(),
+        last_name: "Smith".to_string(),
         email: "dr.smith@example.com".to_string(),
         specialty: "Cardiology".to_string(),
         bio: Some("Experienced cardiologist".to_string()),
         license_number: Some("MD123456".to_string()),
         years_experience: Some(10),
         timezone: "UTC".to_string(),
+        date_of_birth: chrono::NaiveDate::from_ymd_opt(1980, 1, 1).unwrap(),
     };
 
     // Mock email check - return empty array (no existing doctor)
@@ -375,9 +387,24 @@ async fn test_create_doctor_success() {
     Mock::given(method("POST"))
         .and(path("/rest/v1/doctors"))
         .and(header("Prefer", "return=representation"))
-        .respond_with(ResponseTemplate::new(201).set_body_json(json!([
-            create_complete_doctor_response(&doctor_id, &request.email, &request.full_name, &request.specialty)
-        ])))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!([{
+            "id": doctor_id,
+            "first_name": request.first_name,
+            "last_name": request.last_name,
+            "email": request.email,
+            "specialty": request.specialty,
+            "bio": request.bio,
+            "license_number": request.license_number,
+            "years_experience": request.years_experience,
+            "timezone": request.timezone,
+            "date_of_birth": request.date_of_birth.format("%Y-%m-%d").to_string(),
+            "is_verified": false,
+            "is_available": true,
+            "rating": 0.0,
+            "total_consultations": 0,
+            "created_at": Utc::now().to_rfc3339(),
+            "updated_at": Utc::now().to_rfc3339()
+        }])))
         .mount(&mock_server)
         .await;
 
@@ -390,7 +417,8 @@ async fn test_create_doctor_success() {
 
     assert!(result.is_ok(), "Expected create_doctor to succeed, but got error: {:?}", result.err());
     let response = result.unwrap().0;
-    assert_eq!(response["full_name"], request.full_name);
+    assert_eq!(response["first_name"], request.first_name);
+    assert_eq!(response["last_name"], request.last_name);
 }
 
 #[tokio::test]
@@ -400,13 +428,15 @@ async fn test_create_doctor_unauthorized() {
     let token = JwtTestUtils::create_test_token(&patient_user, &config.supabase_jwt_secret, Some(24));
     
     let request = CreateDoctorRequest {
-        full_name: "Dr. John Smith".to_string(),
+        first_name: "Dr. John".to_string(),
+        last_name: "Smith".to_string(),
         email: "dr.smith@example.com".to_string(),
         specialty: "Cardiology".to_string(),
         bio: None,
         license_number: None,
         years_experience: None,
         timezone: "UTC".to_string(),
+        date_of_birth: chrono::NaiveDate::from_ymd_opt(1980, 1, 1).unwrap(),
     };
 
     let result = create_doctor(
@@ -461,12 +491,14 @@ async fn test_update_doctor_as_self() {
     let token = JwtTestUtils::create_test_token(&doctor_user, &config.supabase_jwt_secret, Some(24));
     
     let update_request = UpdateDoctorRequest {
-        full_name: Some("Dr. John Smith Updated".to_string()),
+        first_name: Some("Dr. John".to_string()),
+        last_name: Some("Smith Updated".to_string()),
         bio: Some("Updated bio".to_string()),
         specialty: None,
         years_experience: Some(15),
         timezone: None,
         is_available: None,
+        date_of_birth: None,
     };
 
     // Mock update doctor
@@ -498,12 +530,14 @@ async fn test_update_doctor_unauthorized() {
     let doctor_id = Uuid::new_v4().to_string();
     
     let update_request = UpdateDoctorRequest {
-        full_name: Some("Dr. John Smith Updated".to_string()),
+        first_name: Some("Dr. John".to_string()),
+        last_name: Some("Smith Updated".to_string()),
         bio: None,
         specialty: None,
         years_experience: None,
         timezone: None,
         is_available: None,
+        date_of_birth: None,
     };
 
     let result = update_doctor(

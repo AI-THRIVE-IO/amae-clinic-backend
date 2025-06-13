@@ -36,7 +36,8 @@ async fn test_create_health_profile_success() {
         .and(path("/rest/v1/patients"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!([{
             "id": user.id,
-            "full_name": "Test Female Patient",
+            "first_name": "Test Female",
+            "last_name": "Patient",
             "email": user.email,
             "date_of_birth": "1990-01-01",
             "gender": "female",
@@ -225,7 +226,8 @@ async fn test_update_health_profile_success() {
         .and(path("/rest/v1/patients"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!([{
             "id": user.id,
-            "full_name": "Test Female Patient",
+            "first_name": "Test Female",
+            "last_name": "Patient",
             "email": user.email,
             "date_of_birth": "1990-01-01",
             "gender": "female",
@@ -361,7 +363,8 @@ async fn test_generate_nutrition_plan_success() {
         .and(query_param("id", format!("eq.{}", user.id)))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!([{
             "id": user.id,
-            "full_name": "Test Patient",
+            "first_name": "Test",
+            "last_name": "Patient",
             "email": user.email,
             "date_of_birth": "1990-01-01",
             "gender": "female",

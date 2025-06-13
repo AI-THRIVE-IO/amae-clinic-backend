@@ -255,7 +255,9 @@ async fn test_create_doctor_success() {
     let token = JwtTestUtils::create_test_token(&admin_user, &config.supabase_jwt_secret, None);
 
     let request_body = json!({
-        "full_name": "Dr. New Doctor",
+        "first_name": "Dr. New",
+        "last_name": "Doctor",
+        "date_of_birth": "1980-01-01",
         "email": unique_email,
         "specialty": "General Medicine",
         "timezone": "UTC"
@@ -292,7 +294,8 @@ async fn test_update_doctor_success() {
     let token = JwtTestUtils::create_test_token(&doctor_user, &config.supabase_jwt_secret, None);
 
     let request_body = json!({
-        "full_name": "Dr. Updated Name"
+        "first_name": "Dr. Updated",
+        "last_name": "Name"
     });
 
     let request = Request::builder()
@@ -433,7 +436,9 @@ async fn test_create_doctor_unauthorized() {
     let token = JwtTestUtils::create_test_token(&patient_user, &config.supabase_jwt_secret, None);
 
     let request_body = json!({
-        "full_name": "Dr. New Doctor",
+        "first_name": "Dr. New",
+        "last_name": "Doctor",
+        "date_of_birth": "1980-01-01",
         "email": "newdoc@example.com",
         "specialty": "General Medicine",
         "timezone": "UTC"

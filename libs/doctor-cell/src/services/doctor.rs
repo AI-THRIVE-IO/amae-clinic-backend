@@ -57,13 +57,15 @@ impl DoctorService {
         }
 
         let doctor_data = json!({
-            "full_name": request.full_name,
+            "first_name": request.first_name,
+            "last_name": request.last_name,
             "email": request.email,
             "specialty": request.specialty,
             "bio": request.bio,
             "license_number": request.license_number,
             "years_experience": request.years_experience,
             "timezone": request.timezone,
+            "date_of_birth": request.date_of_birth.format("%Y-%m-%d").to_string(),
             "is_verified": false, // Requires admin verification
             "is_available": true,
             "rating": 0.0,
@@ -136,8 +138,11 @@ impl DoctorService {
         // Build update object with only provided fields
         let mut update_data = serde_json::Map::new();
         
-        if let Some(name) = request.full_name {
-            update_data.insert("full_name".to_string(), json!(name));
+        if let Some(first_name) = request.first_name {
+            update_data.insert("first_name".to_string(), json!(first_name));
+        }
+        if let Some(last_name) = request.last_name {
+            update_data.insert("last_name".to_string(), json!(last_name));
         }
         if let Some(bio) = request.bio {
             update_data.insert("bio".to_string(), json!(bio));
@@ -153,6 +158,9 @@ impl DoctorService {
         }
         if let Some(available) = request.is_available {
             update_data.insert("is_available".to_string(), json!(available));
+        }
+        if let Some(date_of_birth) = request.date_of_birth {
+            update_data.insert("date_of_birth".to_string(), json!(date_of_birth.format("%Y-%m-%d").to_string()));
         }
         
         update_data.insert("updated_at".to_string(), json!(Utc::now().to_rfc3339()));

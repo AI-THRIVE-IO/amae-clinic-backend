@@ -584,7 +584,8 @@ impl AppointmentBookingService {
 
                 alternatives.push(AlternativeSlot {
                     doctor_id: doctor_match.doctor.id,
-                    doctor_name: doctor_match.doctor.full_name.clone(),
+                    doctor_first_name: doctor_match.doctor.first_name.clone(),
+                    doctor_last_name: doctor_match.doctor.last_name.clone(),
                     start_time: slot.start_time,
                     end_time: slot.end_time,
                     match_score: doctor_match.match_score,
