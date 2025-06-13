@@ -188,7 +188,6 @@ impl DoctorMatchingService {
             let availability_query = AvailabilityQueryRequest {
                 date,
                 timezone: Some(timezone.clone()),
-                appointment_type: Some(appointment_type.clone()),
                 duration_minutes: Some(duration_minutes),
             };
 
@@ -356,7 +355,6 @@ impl DoctorMatchingService {
             let availability_query = AvailabilityQueryRequest {
                 date,
                 timezone: Some(request.timezone.clone()),
-                appointment_type: Some(request.appointment_type.clone()),
                 duration_minutes: Some(request.duration_minutes),
             };
 

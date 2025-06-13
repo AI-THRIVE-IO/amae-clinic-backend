@@ -9,15 +9,18 @@ pub struct Doctor {
     pub last_name: String,
     pub email: String,
     pub specialty: String,
+    pub sub_specialty: Option<String>,
     pub bio: Option<String>,
     pub profile_image_url: Option<String>,
-    pub license_number: Option<String>,
+    pub license_number: String,
     pub years_experience: Option<i32>,
-    pub timezone: String,
+    pub timezone: Option<String>,
     pub is_verified: bool,
     pub is_available: bool,
     pub rating: f32,
     pub total_consultations: i32,
+    pub max_daily_appointments: Option<i32>,
+    pub available_days: Vec<i32>,
     pub date_of_birth: NaiveDate,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -26,6 +29,30 @@ pub struct Doctor {
 impl Doctor {
     pub fn full_name(&self) -> String {
         format!("{} {}", self.first_name, self.last_name)
+    }
+}
+
+impl DoctorAvailability {
+    pub fn has_morning_availability(&self) -> bool {
+        self.morning_start_time.is_some() && self.morning_end_time.is_some()
+    }
+    
+    pub fn has_afternoon_availability(&self) -> bool {
+        self.afternoon_start_time.is_some() && self.afternoon_end_time.is_some()
+    }
+    
+    pub fn get_time_slots(&self) -> Vec<(DateTime<Utc>, DateTime<Utc>)> {
+        let mut slots = Vec::new();
+        
+        if let (Some(morning_start), Some(morning_end)) = (self.morning_start_time, self.morning_end_time) {
+            slots.push((morning_start, morning_end));
+        }
+        
+        if let (Some(afternoon_start), Some(afternoon_end)) = (self.afternoon_start_time, self.afternoon_end_time) {
+            slots.push((afternoon_start, afternoon_end));
+        }
+        
+        slots
     }
 }
 
@@ -46,18 +73,12 @@ pub struct DoctorAvailability {
     pub id: Uuid,
     pub doctor_id: Uuid,
     pub day_of_week: i32, // 0 = Sunday, 1 = Monday, etc.
-    pub start_time: NaiveTime,
-    pub end_time: NaiveTime,
     pub duration_minutes: i32,
-    pub timezone: String,
-    pub appointment_type: String,
-    pub buffer_minutes: i32,
-    pub max_concurrent_appointments: i32,
-    pub is_recurring: bool,
-    pub specific_date: Option<NaiveDate>,
     pub is_available: bool,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+    pub morning_start_time: Option<DateTime<Utc>>,
+    pub morning_end_time: Option<DateTime<Utc>>,
+    pub afternoon_start_time: Option<DateTime<Utc>>,
+    pub afternoon_end_time: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,7 +96,6 @@ pub struct AvailableSlot {
     pub start_time: DateTime<Utc>,
     pub end_time: DateTime<Utc>,
     pub duration_minutes: i32,
-    pub appointment_type: String,
     pub timezone: String,
 }
 
@@ -99,10 +119,13 @@ pub struct CreateDoctorRequest {
     pub last_name: String,
     pub email: String,
     pub specialty: String,
+    pub sub_specialty: Option<String>,
     pub bio: Option<String>,
-    pub license_number: Option<String>,
+    pub license_number: String,
     pub years_experience: Option<i32>,
-    pub timezone: String,
+    pub timezone: Option<String>,
+    pub max_daily_appointments: Option<i32>,
+    pub available_days: Option<Vec<i32>>,
     pub date_of_birth: NaiveDate,
 }
 
@@ -112,34 +135,33 @@ pub struct UpdateDoctorRequest {
     pub last_name: Option<String>,
     pub bio: Option<String>,
     pub specialty: Option<String>,
+    pub sub_specialty: Option<String>,
     pub years_experience: Option<i32>,
     pub timezone: Option<String>,
     pub is_available: Option<bool>,
+    pub max_daily_appointments: Option<i32>,
+    pub available_days: Option<Vec<i32>>,
     pub date_of_birth: Option<NaiveDate>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateAvailabilityRequest {
     pub day_of_week: i32,
-    pub start_time: NaiveTime,
-    pub end_time: NaiveTime,
     pub duration_minutes: i32,
-    pub timezone: String,
-    pub appointment_type: String,
-    pub buffer_minutes: Option<i32>,
-    pub max_concurrent_appointments: Option<i32>,
-    pub is_recurring: Option<bool>,
-    pub specific_date: Option<NaiveDate>,
+    pub morning_start_time: Option<DateTime<Utc>>,
+    pub morning_end_time: Option<DateTime<Utc>>,
+    pub afternoon_start_time: Option<DateTime<Utc>>,
+    pub afternoon_end_time: Option<DateTime<Utc>>,
+    pub is_available: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateAvailabilityRequest {
-    pub start_time: Option<NaiveTime>,
-    pub end_time: Option<NaiveTime>,
     pub duration_minutes: Option<i32>,
-    pub timezone: Option<String>,
-    pub buffer_minutes: Option<i32>,
-    pub max_concurrent_appointments: Option<i32>,
+    pub morning_start_time: Option<DateTime<Utc>>,
+    pub morning_end_time: Option<DateTime<Utc>>,
+    pub afternoon_start_time: Option<DateTime<Utc>>,
+    pub afternoon_end_time: Option<DateTime<Utc>>,
     pub is_available: Option<bool>,
 }
 
@@ -163,7 +185,6 @@ pub struct CreateAvailabilityOverrideRequest {
 pub struct AvailabilityQueryRequest {
     pub date: NaiveDate,
     pub timezone: Option<String>,
-    pub appointment_type: Option<String>,
     pub duration_minutes: Option<i32>,
 }
 

@@ -51,6 +51,7 @@ fn create_complete_doctor_response(id: &str, email: &str, full_name: &str, speci
         "last_name": last_name,
         "email": email,
         "specialty": specialty,
+        "sub_specialty": "General Practice",
         "bio": "Experienced physician",
         "license_number": "MD123456",
         "years_experience": 10,
@@ -59,6 +60,8 @@ fn create_complete_doctor_response(id: &str, email: &str, full_name: &str, speci
         "is_available": true,
         "rating": 4.5,
         "total_consultations": 150,
+        "max_daily_appointments": 8,
+        "available_days": [1, 2, 3, 4, 5],
         "date_of_birth": "1980-01-01",
         "created_at": Utc::now().to_rfc3339(),
         "updated_at": Utc::now().to_rfc3339()
@@ -369,10 +372,13 @@ async fn test_create_doctor_success() {
         last_name: "Smith".to_string(),
         email: "dr.smith@example.com".to_string(),
         specialty: "Cardiology".to_string(),
+        sub_specialty: Some("Interventional Cardiology".to_string()),
         bio: Some("Experienced cardiologist".to_string()),
-        license_number: Some("MD123456".to_string()),
+        license_number: "MD123456".to_string(),
         years_experience: Some(10),
-        timezone: "UTC".to_string(),
+        timezone: Some("UTC".to_string()),
+        max_daily_appointments: Some(8),
+        available_days: Some(vec![1, 2, 3, 4, 5]),
         date_of_birth: chrono::NaiveDate::from_ymd_opt(1980, 1, 1).unwrap(),
     };
 
@@ -393,10 +399,13 @@ async fn test_create_doctor_success() {
             "last_name": request.last_name,
             "email": request.email,
             "specialty": request.specialty,
+            "sub_specialty": request.sub_specialty,
             "bio": request.bio,
             "license_number": request.license_number,
             "years_experience": request.years_experience,
             "timezone": request.timezone,
+            "max_daily_appointments": request.max_daily_appointments,
+            "available_days": request.available_days.clone().unwrap_or_else(|| vec![1, 2, 3, 4, 5]),
             "date_of_birth": request.date_of_birth.format("%Y-%m-%d").to_string(),
             "is_verified": false,
             "is_available": true,
@@ -432,10 +441,13 @@ async fn test_create_doctor_unauthorized() {
         last_name: "Smith".to_string(),
         email: "dr.smith@example.com".to_string(),
         specialty: "Cardiology".to_string(),
+        sub_specialty: None,
         bio: None,
-        license_number: None,
+        license_number: "TEMP123456".to_string(),
         years_experience: None,
-        timezone: "UTC".to_string(),
+        timezone: Some("UTC".to_string()),
+        max_daily_appointments: None,
+        available_days: None,
         date_of_birth: chrono::NaiveDate::from_ymd_opt(1980, 1, 1).unwrap(),
     };
 
@@ -498,6 +510,9 @@ async fn test_update_doctor_as_self() {
         years_experience: Some(15),
         timezone: None,
         is_available: None,
+        max_daily_appointments: None,
+        available_days: None,
+        sub_specialty: None,
         date_of_birth: None,
     };
 
@@ -537,6 +552,9 @@ async fn test_update_doctor_unauthorized() {
         years_experience: None,
         timezone: None,
         is_available: None,
+        max_daily_appointments: None,
+        available_days: None,
+        sub_specialty: None,
         date_of_birth: None,
     };
 
@@ -691,15 +709,12 @@ async fn test_create_availability_as_doctor() {
     
     let availability_request = CreateAvailabilityRequest {
         day_of_week: 1,
-        start_time: NaiveTime::from_hms_opt(9, 0, 0).unwrap(),
-        end_time: NaiveTime::from_hms_opt(17, 0, 0).unwrap(),
         duration_minutes: 30,
-        timezone: "UTC".to_string(),
-        appointment_type: "consultation".to_string(),
-        buffer_minutes: None,
-        max_concurrent_appointments: None,
-        is_recurring: None,
-        specific_date: None,
+        morning_start_time: Some(Utc::now().date_naive().and_time(NaiveTime::from_hms_opt(9, 0, 0).unwrap()).and_utc()),
+        morning_end_time: Some(Utc::now().date_naive().and_time(NaiveTime::from_hms_opt(12, 0, 0).unwrap()).and_utc()),
+        afternoon_start_time: Some(Utc::now().date_naive().and_time(NaiveTime::from_hms_opt(13, 0, 0).unwrap()).and_utc()),
+        afternoon_end_time: Some(Utc::now().date_naive().and_time(NaiveTime::from_hms_opt(17, 0, 0).unwrap()).and_utc()),
+        is_available: Some(true),
     };
 
     // FIXED: Setup correct mocks using appointment_availabilities table
@@ -728,15 +743,12 @@ async fn test_create_availability_unauthorized() {
     
     let availability_request = CreateAvailabilityRequest {
         day_of_week: 1,
-        start_time: NaiveTime::from_hms_opt(9, 0, 0).unwrap(),
-        end_time: NaiveTime::from_hms_opt(17, 0, 0).unwrap(),
         duration_minutes: 30,
-        timezone: "UTC".to_string(),
-        appointment_type: "consultation".to_string(),
-        buffer_minutes: None,
-        max_concurrent_appointments: None,
-        is_recurring: None,
-        specific_date: None,
+        morning_start_time: Some(Utc::now().date_naive().and_time(NaiveTime::from_hms_opt(9, 0, 0).unwrap()).and_utc()),
+        morning_end_time: Some(Utc::now().date_naive().and_time(NaiveTime::from_hms_opt(12, 0, 0).unwrap()).and_utc()),
+        afternoon_start_time: Some(Utc::now().date_naive().and_time(NaiveTime::from_hms_opt(13, 0, 0).unwrap()).and_utc()),
+        afternoon_end_time: Some(Utc::now().date_naive().and_time(NaiveTime::from_hms_opt(17, 0, 0).unwrap()).and_utc()),
+        is_available: Some(true),
     };
 
     let result = create_availability(

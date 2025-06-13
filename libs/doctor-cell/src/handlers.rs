@@ -121,7 +121,6 @@ pub async fn get_doctor_availability_public(
     let availability_request = AvailabilityQueryRequest {
         date,
         timezone: query.timezone,
-        appointment_type: query.appointment_type,
         duration_minutes: query.duration_minutes,
     };
     
@@ -146,7 +145,6 @@ pub async fn get_available_slots_public(
     let availability_request = AvailabilityQueryRequest {
         date,
         timezone: query.timezone,
-        appointment_type: query.appointment_type,
         duration_minutes: query.duration_minutes,
     };
     
@@ -449,7 +447,6 @@ pub async fn get_available_slots(
     let availability_query = AvailabilityQueryRequest {
         date,
         timezone: query.timezone,
-        appointment_type: query.appointment_type,
         duration_minutes: query.duration_minutes,
     };
     

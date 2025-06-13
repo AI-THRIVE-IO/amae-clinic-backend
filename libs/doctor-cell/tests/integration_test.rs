@@ -260,7 +260,11 @@ async fn test_create_doctor_success() {
         "date_of_birth": "1980-01-01",
         "email": unique_email,
         "specialty": "General Medicine",
-        "timezone": "UTC"
+        "sub_specialty": "Internal Medicine",
+        "license_number": "MD123456",
+        "timezone": "UTC",
+        "max_daily_appointments": 8,
+        "available_days": [1, 2, 3, 4, 5]
     });
 
     let request = Request::builder()
@@ -349,11 +353,12 @@ async fn test_create_availability_success() {
 
     let request_body = json!({
         "day_of_week": 1,
-        "start_time": "09:00:00",
-        "end_time": "17:00:00",
         "duration_minutes": 30,
-        "timezone": "UTC",
-        "appointment_type": "consultation"
+        "morning_start_time": "2024-01-01T09:00:00Z",
+        "morning_end_time": "2024-01-01T12:00:00Z",
+        "afternoon_start_time": "2024-01-01T13:00:00Z",
+        "afternoon_end_time": "2024-01-01T17:00:00Z",
+        "is_available": true
     });
 
     let request = Request::builder()
@@ -441,7 +446,11 @@ async fn test_create_doctor_unauthorized() {
         "date_of_birth": "1980-01-01",
         "email": "newdoc@example.com",
         "specialty": "General Medicine",
-        "timezone": "UTC"
+        "sub_specialty": "Internal Medicine",
+        "license_number": "MD123456",
+        "timezone": "UTC",
+        "max_daily_appointments": 8,
+        "available_days": [1, 2, 3, 4, 5]
     });
 
     let request = Request::builder()

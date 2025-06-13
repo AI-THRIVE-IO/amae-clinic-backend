@@ -1,5 +1,5 @@
 use anyhow::{Result, anyhow};
-use chrono::{NaiveDate, NaiveTime, DateTime, Utc, Datelike, Weekday, Duration};
+use chrono::{NaiveDate, DateTime, Utc, Datelike, Weekday, Duration};
 use reqwest::Method;
 use serde_json::{json, Value};
 use tracing::{debug, warn, error};
@@ -38,44 +38,42 @@ pub fn new(config: &AppConfig) -> Self {
     ) -> Result<DoctorAvailability> {
         debug!("Creating availability for doctor: {}", doctor_id);
 
-        // Validate time range
-        if request.start_time >= request.end_time {
-            return Err(anyhow!("Start time must be before end time"));
-        }
-
         // Validate day of week (0-6)
         if request.day_of_week < 0 || request.day_of_week > 6 {
             return Err(anyhow!("Day of week must be between 0 (Sunday) and 6 (Saturday)"));
         }
 
-        // Check for overlapping availability
-        if let Err(e) = self.check_availability_conflicts(
-            doctor_id,
-            request.day_of_week,
-            request.start_time,
-            request.end_time,
-            request.specific_date,
-            None, // No existing ID to exclude
-            auth_token,
-        ).await {
-            return Err(e);
+        // Validate that at least one time slot is provided
+        let has_morning = request.morning_start_time.is_some() && request.morning_end_time.is_some();
+        let has_afternoon = request.afternoon_start_time.is_some() && request.afternoon_end_time.is_some();
+        
+        if !has_morning && !has_afternoon {
+            return Err(anyhow!("At least one time slot (morning or afternoon) must be provided"));
+        }
+
+        // Validate morning time range if provided
+        if let (Some(morning_start), Some(morning_end)) = (request.morning_start_time, request.morning_end_time) {
+            if morning_start >= morning_end {
+                return Err(anyhow!("Morning start time must be before morning end time"));
+            }
+        }
+
+        // Validate afternoon time range if provided
+        if let (Some(afternoon_start), Some(afternoon_end)) = (request.afternoon_start_time, request.afternoon_end_time) {
+            if afternoon_start >= afternoon_end {
+                return Err(anyhow!("Afternoon start time must be before afternoon end time"));
+            }
         }
 
         let availability_data = json!({
             "doctor_id": doctor_id,
             "day_of_week": request.day_of_week,
-            "start_time": request.start_time.format("%H:%M:%S").to_string(),
-            "end_time": request.end_time.format("%H:%M:%S").to_string(),
             "duration_minutes": request.duration_minutes,
-            "timezone": request.timezone,
-            "appointment_type": request.appointment_type,
-            "buffer_minutes": request.buffer_minutes.unwrap_or(15),
-            "max_concurrent_appointments": request.max_concurrent_appointments.unwrap_or(1),
-            "is_recurring": request.is_recurring.unwrap_or(true),
-            "specific_date": request.specific_date,
-            "is_available": true,
-            "created_at": Utc::now().to_rfc3339(),
-            "updated_at": Utc::now().to_rfc3339()
+            "morning_start_time": request.morning_start_time.map(|t| t.to_rfc3339()),
+            "morning_end_time": request.morning_end_time.map(|t| t.to_rfc3339()),
+            "afternoon_start_time": request.afternoon_start_time.map(|t| t.to_rfc3339()),
+            "afternoon_end_time": request.afternoon_end_time.map(|t| t.to_rfc3339()),
+            "is_available": request.is_available.unwrap_or(true)
         });
 
         let mut headers = reqwest::header::HeaderMap::new();
@@ -108,49 +106,37 @@ pub fn new(config: &AppConfig) -> Self {
     ) -> Result<DoctorAvailability> {
         debug!("Updating availability: {}", availability_id);
 
-        // Get current availability to check for conflicts
-        let current = self.get_availability_by_id(availability_id, auth_token).await?;
-
-        // Validate time range if both times are provided
-        if let (Some(start), Some(end)) = (request.start_time, request.end_time) {
-            if start >= end {
-                return Err(anyhow!("Start time must be before end time"));
+        // Validate morning time range if provided
+        if let (Some(morning_start), Some(morning_end)) = (request.morning_start_time, request.morning_end_time) {
+            if morning_start >= morning_end {
+                return Err(anyhow!("Morning start time must be before morning end time"));
             }
+        }
 
-            // Check for conflicts
-            if let Err(e) = self.check_availability_conflicts(
-                &current.doctor_id.to_string(),
-                current.day_of_week,
-                start,
-                end,
-                current.specific_date,
-                Some(availability_id),
-                auth_token,
-            ).await {
-                return Err(e);
+        // Validate afternoon time range if provided
+        if let (Some(afternoon_start), Some(afternoon_end)) = (request.afternoon_start_time, request.afternoon_end_time) {
+            if afternoon_start >= afternoon_end {
+                return Err(anyhow!("Afternoon start time must be before afternoon end time"));
             }
         }
 
         // Build update object
         let mut update_data = serde_json::Map::new();
         
-        if let Some(start_time) = request.start_time {
-            update_data.insert("start_time".to_string(), json!(start_time.format("%H:%M:%S").to_string()));
+        if let Some(morning_start_time) = request.morning_start_time {
+            update_data.insert("morning_start_time".to_string(), json!(morning_start_time.to_rfc3339()));
         }
-        if let Some(end_time) = request.end_time {
-            update_data.insert("end_time".to_string(), json!(end_time.format("%H:%M:%S").to_string()));
+        if let Some(morning_end_time) = request.morning_end_time {
+            update_data.insert("morning_end_time".to_string(), json!(morning_end_time.to_rfc3339()));
+        }
+        if let Some(afternoon_start_time) = request.afternoon_start_time {
+            update_data.insert("afternoon_start_time".to_string(), json!(afternoon_start_time.to_rfc3339()));
+        }
+        if let Some(afternoon_end_time) = request.afternoon_end_time {
+            update_data.insert("afternoon_end_time".to_string(), json!(afternoon_end_time.to_rfc3339()));
         }
         if let Some(duration) = request.duration_minutes {
             update_data.insert("duration_minutes".to_string(), json!(duration));
-        }
-        if let Some(timezone) = request.timezone {
-            update_data.insert("timezone".to_string(), json!(timezone));
-        }
-        if let Some(buffer) = request.buffer_minutes {
-            update_data.insert("buffer_minutes".to_string(), json!(buffer));
-        }
-        if let Some(max_concurrent) = request.max_concurrent_appointments {
-            update_data.insert("max_concurrent_appointments".to_string(), json!(max_concurrent));
         }
         if let Some(is_available) = request.is_available {
             update_data.insert("is_available".to_string(), json!(is_available));
@@ -186,7 +172,7 @@ pub fn new(config: &AppConfig) -> Self {
     ) -> Result<Vec<DoctorAvailability>> {
         debug!("Fetching availability for doctor: {}", doctor_id);
 
-        let path = format!("/rest/v1/appointment_availabilities?doctor_id=eq.{}&order=day_of_week.asc,start_time.asc", doctor_id);
+        let path = format!("/rest/v1/appointment_availabilities?doctor_id=eq.{}&order=day_of_week.asc,morning_start_time.asc", doctor_id);
         let result: Vec<Value> = self.supabase.request(
             Method::GET,
             &path,
@@ -225,17 +211,14 @@ pub fn new(config: &AppConfig) -> Self {
         };
 
         // Get availability schedules for this day
-        let mut availability_schedules = self.get_availability_for_day(
+        let availability_schedules = self.get_availability_for_day(
             doctor_id, 
             day_of_week, 
             Some(query.date),
             auth_token
         ).await?;
 
-        // Filter by appointment type if specified
-        if let Some(ref appointment_type) = query.appointment_type {
-            availability_schedules.retain(|avail| avail.appointment_type == *appointment_type);
-        }
+        // Note: appointment_type filtering removed as it's no longer part of the availability model
 
         // Check for availability overrides
         let overrides = self.get_availability_overrides(doctor_id, query.date, auth_token).await?;
@@ -260,7 +243,7 @@ pub fn new(config: &AppConfig) -> Self {
                 &schedule,
                 query.date,
                 query.duration_minutes,
-                query.timezone.as_deref().unwrap_or(schedule.timezone.as_str()),
+                query.timezone.as_deref().unwrap_or("UTC"),
             ).await?;
 
             available_slots.extend(slots);
@@ -334,7 +317,6 @@ pub fn new(config: &AppConfig) -> Self {
         &self,
         doctor_ids: Vec<String>,
         date: NaiveDate,
-        appointment_type: Option<String>,
         auth_token: &str,
     ) -> Result<Vec<DoctorAvailabilityResponse>> {
         debug!("Getting availability summary for {} doctors on {}", doctor_ids.len(), date);
@@ -362,7 +344,6 @@ pub fn new(config: &AppConfig) -> Self {
             let query = AvailabilityQueryRequest {
                 date,
                 timezone: Some(doctor_data["timezone"].as_str().unwrap_or("UTC").to_string()),
-                appointment_type: appointment_type.clone(),
                 duration_minutes: None,
             };
 
@@ -423,76 +404,19 @@ pub fn new(config: &AppConfig) -> Self {
         Ok(availability)
     }
 
-    async fn check_availability_conflicts(
-        &self,
-        doctor_id: &str,
-        day_of_week: i32,
-        start_time: NaiveTime,
-        end_time: NaiveTime,
-        specific_date: Option<NaiveDate>,
-        exclude_id: Option<&str>,
-        auth_token: &str,
-    ) -> Result<()> {
-        let mut path = format!(
-            "/rest/v1/appointment_availabilities?doctor_id=eq.{}&day_of_week=eq.{}", 
-            doctor_id, 
-            day_of_week
-        );
-
-        if let Some(date) = specific_date {
-            path.push_str(&format!("&specific_date=eq.{}", date));
-        }
-
-        if let Some(id) = exclude_id {
-            path.push_str(&format!("&id=neq.{}", id));
-        }
-
-        let existing: Vec<Value> = self.supabase.request(
-            Method::GET,
-            &path,
-            Some(auth_token),
-            None,
-        ).await?;
-
-        for avail in existing {
-            let existing_start = NaiveTime::parse_from_str(
-                avail["start_time"].as_str().unwrap(), 
-                "%H:%M:%S"
-            )?;
-            let existing_end = NaiveTime::parse_from_str(
-                avail["end_time"].as_str().unwrap(), 
-                "%H:%M:%S"
-            )?;
-
-            // Check for overlap
-            if start_time < existing_end && end_time > existing_start {
-                return Err(anyhow!("Availability conflicts with existing schedule"));
-            }
-        }
-
-        Ok(())
-    }
 
     async fn get_availability_for_day(
         &self,
         doctor_id: &str,
         day_of_week: i32,
-        specific_date: Option<NaiveDate>,
+        _specific_date: Option<NaiveDate>,
         auth_token: &str,
     ) -> Result<Vec<DoctorAvailability>> {
-        let mut path = format!(
-            "/rest/v1/appointment_availabilities?doctor_id=eq.{}&day_of_week=eq.{}&is_available=eq.true&order=start_time.asc", 
+        let path = format!(
+            "/rest/v1/appointment_availabilities?doctor_id=eq.{}&day_of_week=eq.{}&is_available=eq.true", 
             doctor_id, 
             day_of_week
         );
-
-        // Include both recurring and specific date availabilities
-        if let Some(date) = specific_date {
-            path = format!(
-                "/rest/v1/appointment_availabilities?doctor_id=eq.{}&day_of_week=eq.{}&is_available=eq.true&or=(is_recurring.eq.true,specific_date.eq.{})&order=start_time.asc",
-                doctor_id, day_of_week, date
-            );
-        }
 
         let result: Vec<Value> = self.supabase.request(
             Method::GET,
@@ -544,14 +468,52 @@ pub fn new(config: &AppConfig) -> Self {
         timezone: &str,
     ) -> Result<Vec<AvailableSlot>> {
         let duration_minutes = requested_duration.unwrap_or(schedule.duration_minutes);
-        let buffer_minutes = schedule.buffer_minutes;
-        let total_slot_duration = duration_minutes + buffer_minutes;
-
-        // Convert schedule times to UTC for the given date
-        let start_datetime = date.and_time(schedule.start_time).and_utc();
-        let end_datetime = date.and_time(schedule.end_time).and_utc();
-
         let mut slots = Vec::new();
+
+        // Generate morning slots if available
+        if let (Some(morning_start), Some(morning_end)) = (schedule.morning_start_time, schedule.morning_end_time) {
+            let morning_slots = self.generate_slots_for_time_range(
+                date,
+                morning_start,
+                morning_end,
+                duration_minutes,
+                timezone,
+            )?;
+            slots.extend(morning_slots);
+        }
+
+        // Generate afternoon slots if available
+        if let (Some(afternoon_start), Some(afternoon_end)) = (schedule.afternoon_start_time, schedule.afternoon_end_time) {
+            let afternoon_slots = self.generate_slots_for_time_range(
+                date,
+                afternoon_start,
+                afternoon_end,
+                duration_minutes,
+                timezone,
+            )?;
+            slots.extend(afternoon_slots);
+        }
+
+        Ok(slots)
+    }
+
+    fn generate_slots_for_time_range(
+        &self,
+        date: NaiveDate,
+        start_time: DateTime<Utc>,
+        end_time: DateTime<Utc>,
+        duration_minutes: i32,
+        timezone: &str,
+    ) -> Result<Vec<AvailableSlot>> {
+        let mut slots = Vec::new();
+        
+        // Extract time components and combine with the target date
+        let start_naive_time = start_time.time();
+        let end_naive_time = end_time.time();
+        
+        let start_datetime = date.and_time(start_naive_time).and_utc();
+        let end_datetime = date.and_time(end_naive_time).and_utc();
+        
         let mut current_time = start_datetime;
 
         while current_time + Duration::minutes(duration_minutes as i64) <= end_datetime {
@@ -561,11 +523,10 @@ pub fn new(config: &AppConfig) -> Self {
                 start_time: current_time,
                 end_time: slot_end,
                 duration_minutes,
-                appointment_type: schedule.appointment_type.clone(),
                 timezone: timezone.to_string(),
             });
 
-            current_time += Duration::minutes(total_slot_duration as i64);
+            current_time += Duration::minutes(duration_minutes as i64);
         }
 
         Ok(slots)
@@ -608,17 +569,15 @@ pub fn new(config: &AppConfig) -> Self {
         doctor_service.get_doctor_public(doctor_id).await?;
 
         let day_of_week = query.date.weekday().num_days_from_monday() as i32;
-        let mut query_parts = vec![
+        let query_parts = vec![
             format!("doctor_id=eq.{}", doctor_id),
             format!("day_of_week=eq.{}", day_of_week),
             "is_available=eq.true".to_string(),
         ];
 
-        if let Some(appointment_type) = &query.appointment_type {
-            query_parts.push(format!("appointment_type=eq.{}", appointment_type));
-        }
+        // Note: appointment_type filtering removed as it's no longer part of the availability model
 
-        let path = format!("/rest/v1/appointment_availabilities?{}&order=start_time.asc", 
+        let path = format!("/rest/v1/appointment_availabilities?{}&order=morning_start_time.asc", 
                           query_parts.join("&"));
 
         let result: Vec<Value> = self.supabase.request(

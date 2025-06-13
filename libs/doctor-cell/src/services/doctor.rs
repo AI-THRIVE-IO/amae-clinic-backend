@@ -38,9 +38,11 @@ impl DoctorService {
     ) -> Result<Doctor> {
         debug!("Creating new doctor profile for: {}", request.email);
 
-        // Validate timezone
-        if !self.is_valid_timezone(&request.timezone) {
-            return Err(anyhow!("Invalid timezone: {}", request.timezone));
+        // Validate timezone if provided
+        if let Some(ref timezone) = request.timezone {
+            if !self.is_valid_timezone(timezone) {
+                return Err(anyhow!("Invalid timezone: {}", timezone));
+            }
         }
 
         // Check if doctor with email already exists
@@ -61,10 +63,13 @@ impl DoctorService {
             "last_name": request.last_name,
             "email": request.email,
             "specialty": request.specialty,
+            "sub_specialty": request.sub_specialty,
             "bio": request.bio,
             "license_number": request.license_number,
             "years_experience": request.years_experience,
             "timezone": request.timezone,
+            "max_daily_appointments": request.max_daily_appointments,
+            "available_days": request.available_days.unwrap_or_else(|| vec![1, 2, 3, 4, 5]),
             "date_of_birth": request.date_of_birth.format("%Y-%m-%d").to_string(),
             "is_verified": false, // Requires admin verification
             "is_available": true,
@@ -150,6 +155,9 @@ impl DoctorService {
         if let Some(specialty) = request.specialty {
             update_data.insert("specialty".to_string(), json!(specialty));
         }
+        if let Some(sub_specialty) = request.sub_specialty {
+            update_data.insert("sub_specialty".to_string(), json!(sub_specialty));
+        }
         if let Some(experience) = request.years_experience {
             update_data.insert("years_experience".to_string(), json!(experience));
         }
@@ -158,6 +166,12 @@ impl DoctorService {
         }
         if let Some(available) = request.is_available {
             update_data.insert("is_available".to_string(), json!(available));
+        }
+        if let Some(max_daily_appointments) = request.max_daily_appointments {
+            update_data.insert("max_daily_appointments".to_string(), json!(max_daily_appointments));
+        }
+        if let Some(available_days) = request.available_days {
+            update_data.insert("available_days".to_string(), json!(available_days));
         }
         if let Some(date_of_birth) = request.date_of_birth {
             update_data.insert("date_of_birth".to_string(), json!(date_of_birth.format("%Y-%m-%d").to_string()));
