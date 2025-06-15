@@ -7,7 +7,7 @@ use axum_extra::TypedHeader;
 use headers::{Authorization, authorization::Bearer};
 use serde_json::json;
 use wiremock::{MockServer, Mock, ResponseTemplate};
-use wiremock::matchers::{method, path, query_param};
+use wiremock::matchers::{method, path, query_param, query_param_contains};
 use chrono::{Utc, Datelike};
 use uuid::Uuid;
 
@@ -132,6 +132,33 @@ async fn setup_appointment_mocks(mock_server: &MockServer, patient_id: &str, doc
         .mount(mock_server)
         .await;
     
+    // Mock patient telemedicine profile lookup (required for telemedicine validation)
+    // Provide a profile that passes all telemedicine readiness checks
+    Mock::given(method("GET"))
+        .and(path("/rest/v1/patient_telemedicine_profiles"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {
+                "patient_id": patient_id,
+                "telemedicine_consent": true,
+                "device_compatibility_verified": true,
+                "network_speed_adequate": true,
+                "privacy_environment_confirmed": true,
+                "preferred_communication_method": "video",
+                "technical_assistance_needed": false
+            }
+        ])))
+        .mount(mock_server)
+        .await;
+
+    // Mock telemedicine session creation (required for video conference link generation)
+    // The service uses request::<()> expecting a void response, but Supabase returns JSON
+    // Match the pattern used by other POST operations
+    Mock::given(method("POST"))
+        .and(path("/rest/v1/telemedicine_sessions"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!([])))
+        .mount(mock_server)
+        .await;
+
     // Mock appointment operations (create, update, etc.)
     Mock::given(method("POST"))
         .and(path("/rest/v1/appointments"))
@@ -176,41 +203,8 @@ async fn test_book_appointment_success() {
         specialty_required: None,
     };
 
-    // Mock patient lookup
-    Mock::given(method("GET"))
-        .and(path("/rest/v1/patients"))
-        .and(query_param("id", format!("eq.{}", patient_user.id)))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
-            MockSupabaseResponses::patient_response(&patient_user.id, "patient@example.com", "Test Patient")
-        ])))
-        .mount(&mock_server)
-        .await;
-    
-    // Mock doctor lookup
-    Mock::given(method("GET"))
-        .and(path("/rest/v1/doctors"))
-        .and(query_param("id", format!("eq.{}", doctor_id)))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
-            MockSupabaseResponses::doctor_response(&doctor_id.to_string(), "doctor@example.com", "Dr. Test", "General Practice")
-        ])))
-        .mount(&mock_server)
-        .await;
-    
-    // Mock conflict check (no conflicts)
-    Mock::given(method("GET"))
-        .and(path("/rest/v1/appointments"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
-        .mount(&mock_server)
-        .await;
-
-    // Mock appointment creation
-    Mock::given(method("POST"))
-        .and(path("/rest/v1/appointments"))
-        .respond_with(ResponseTemplate::new(201).set_body_json(json!([
-            MockSupabaseResponses::appointment_response(&patient_user.id, &doctor_id.to_string())
-        ])))
-        .mount(&mock_server)
-        .await;
+    // Use the comprehensive mock setup that works for other tests
+    setup_appointment_mocks(&mock_server, &patient_user.id, &doctor_id.to_string()).await;
 
     let result = book_appointment(
         State(Arc::new(config)),
@@ -219,7 +213,10 @@ async fn test_book_appointment_success() {
         Json(book_request)
     ).await;
 
-    assert!(result.is_ok());
+    if let Err(ref e) = result {
+        println!("Booking error: {:?}", e);
+    }
+    assert!(result.is_ok(), "Expected booking to succeed, got error: {:?}", result.err());
     let response = result.unwrap().0;
     assert!(response["success"].as_bool().unwrap());
     assert!(response["appointment"].is_object());
@@ -252,67 +249,9 @@ async fn test_book_appointment_conflict() {
         specialty_required: None,
     };
 
-    // Use comprehensive appointment mocking pattern from integration tests
-    // Mock patient lookup
-    Mock::given(method("GET"))
-        .and(path("/rest/v1/patients"))
-        .and(query_param("id", format!("eq.{}", patient_user.id)))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
-            MockSupabaseResponses::patient_response(&patient_user.id, "patient@example.com", "Test Patient")
-        ])))
-        .mount(&mock_server)
-        .await;
-    
-    // Mock specific doctor lookup by ID
-    Mock::given(method("GET"))
-        .and(path("/rest/v1/doctors"))
-        .and(query_param("id", format!("eq.{}", doctor_id)))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
-            MockSupabaseResponses::doctor_response(&doctor_id.to_string(), "doctor@example.com", "Dr. Test", "General Practice")
-        ])))
-        .mount(&mock_server)
-        .await;
-    
-    // Mock comprehensive doctor searches (from integration test success pattern)
-    // Query 1: Specialty validation search
-    Mock::given(method("GET"))
-        .and(path("/rest/v1/doctors"))
-        .and(query_param("is_available", "eq.true"))
-        .and(query_param("is_verified", "eq.true"))
-        .and(query_param("limit", "1"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
-            MockSupabaseResponses::doctor_response(&doctor_id.to_string(), "doctor@example.com", "Dr. Test", "General Practice")
-        ])))
-        .mount(&mock_server)
-        .await;
-    
-    // Query 4: Main doctor search with rating filter
-    Mock::given(method("GET"))
-        .and(path("/rest/v1/doctors"))
-        .and(query_param("is_available", "eq.true"))
-        .and(query_param("is_verified", "eq.true"))
-        .and(query_param("rating", "gte.3"))
-        .and(query_param("limit", "50"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
-            MockSupabaseResponses::doctor_response(&doctor_id.to_string(), "doctor@example.com", "Dr. Test", "General Practice")
-        ])))
-        .mount(&mock_server)
-        .await;
-    
-    // Generic doctor search fallback
-    Mock::given(method("GET"))
-        .and(path("/rest/v1/doctors"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
-            MockSupabaseResponses::doctor_response(&doctor_id.to_string(), "doctor@example.com", "Dr. Test", "General Practice")
-        ])))
-        .mount(&mock_server)
-        .await;
-    
-    // BROAD CONFLICT MOCK - return conflict for any appointment query with this doctor
-    // This will catch the conflict check query regardless of exact parameters
+    // PRODUCTION FIX: Return conflicting appointment data - MOUNT BEFORE setup to avoid override
     Mock::given(method("GET"))
         .and(path("/rest/v1/appointments"))
-        .and(query_param("doctor_id", format!("eq.{}", doctor_id)))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!([
             {
                 "id": Uuid::new_v4().to_string(),
@@ -340,40 +279,9 @@ async fn test_book_appointment_conflict() {
         ])))
         .mount(&mock_server)
         .await;
-    
-    // Mock patient appointment history lookup (more specific than conflict check)
-    Mock::given(method("GET"))
-        .and(path("/rest/v1/appointments"))
-        .and(query_param("patient_id", format!("eq.{}", patient_user.id)))
-        .and(query_param("status", "eq.completed"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
-        .mount(&mock_server)
-        .await;
-    
-    // Mock availability lookup (from integration test success pattern)
-    let tomorrow = chrono::Utc::now() + chrono::Duration::days(1);
-    Mock::given(method("GET"))
-        .and(path("/rest/v1/appointment_availabilities"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
-            {
-                "start_time": format!("{}T10:00:00Z", tomorrow.format("%Y-%m-%d")),
-                "end_time": format!("{}T10:30:00Z", tomorrow.format("%Y-%m-%d")),
-                "duration_minutes": 30,
-                "appointment_type": "consultation",
-                "timezone": "UTC"
-            }
-        ])))
-        .mount(&mock_server)
-        .await;
-    
-    // Mock appointment creation (even though it should fail due to conflict)
-    Mock::given(method("POST"))
-        .and(path("/rest/v1/appointments"))
-        .respond_with(ResponseTemplate::new(201).set_body_json(json!([
-            MockSupabaseResponses::appointment_response(&patient_user.id, &doctor_id.to_string())
-        ])))
-        .mount(&mock_server)
-        .await;
+
+    // Use the proven setup_appointment_mocks pattern - this should NOT override the specific mock above
+    setup_appointment_mocks(&mock_server, &patient_user.id, &doctor_id.to_string()).await;
 
     let result = book_appointment(
         State(Arc::new(config)),
@@ -382,12 +290,20 @@ async fn test_book_appointment_conflict() {
         Json(book_request)
     ).await;
 
+    // VERIFY: Conflict detection working correctly
     if let Err(ref e) = result {
-        println!("Conflict test error: {:?}", e);
+        println!("✅ Conflict detection working: {:?}", e);
+    } else {
+        println!("❌ CRITICAL: Conflicts not detected - would cause double-booking!");
     }
-    assert!(result.is_err());
+    
+    // ASSERT: Conflict detection should work correctly  
+    assert!(result.is_err(), "Conflict detection must work to prevent double-booking");
     match result.unwrap_err() {
-        AppError::BadRequest(msg) => assert!(msg.contains("conflict") || msg.contains("unavailable")),
+        AppError::BadRequest(msg) => {
+            assert!(msg.contains("conflict") || msg.contains("unavailable"), 
+                    "Expected conflict error message, got: {}", msg);
+        },
         _ => panic!("Expected BadRequest error for conflict"),
     }
 }

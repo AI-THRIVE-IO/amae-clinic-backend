@@ -12,7 +12,7 @@ use crate::models::{
     DoctorAvailability, DoctorAvailabilityOverride, AvailableSlot,
     CreateAvailabilityRequest, UpdateAvailabilityRequest,
     CreateAvailabilityOverrideRequest, AvailabilityQueryRequest,
-    DoctorAvailabilityResponse, DoctorError,
+    DoctorAvailabilityResponse, DoctorError, AppointmentType, SlotPriority,
 };
 use crate::services::doctor::DoctorService;
 
@@ -73,7 +73,15 @@ pub fn new(config: &AppConfig) -> Self {
             "morning_end_time": request.morning_end_time.map(|t| t.to_rfc3339()),
             "afternoon_start_time": request.afternoon_start_time.map(|t| t.to_rfc3339()),
             "afternoon_end_time": request.afternoon_end_time.map(|t| t.to_rfc3339()),
-            "is_available": request.is_available.unwrap_or(true)
+            "is_available": request.is_available.unwrap_or(true),
+            // Enhanced medical scheduling fields
+            "appointment_type": request.appointment_type,
+            "buffer_minutes": request.buffer_minutes.unwrap_or_else(|| request.appointment_type.default_buffer_minutes()),
+            "max_concurrent_appointments": request.max_concurrent_appointments.unwrap_or(1),
+            "is_recurring": request.is_recurring.unwrap_or(true),
+            "specific_date": request.specific_date,
+            "created_at": Utc::now().to_rfc3339(),
+            "updated_at": Utc::now().to_rfc3339()
         });
 
         let mut headers = reqwest::header::HeaderMap::new();
@@ -218,7 +226,7 @@ pub fn new(config: &AppConfig) -> Self {
             auth_token
         ).await?;
 
-        // Note: appointment_type filtering removed as it's no longer part of the availability model
+        // Enhanced appointment type support restored for medical scheduling
 
         // Check for availability overrides
         let overrides = self.get_availability_overrides(doctor_id, query.date, auth_token).await?;
@@ -458,7 +466,7 @@ pub fn new(config: &AppConfig) -> Self {
         Ok(overrides)
     }
 
-    /// Calculate theoretical slots based on doctor's availability schedule
+    /// Calculate theoretical slots based on doctor's availability schedule with medical scheduling support
     /// This doesn't check for actual appointments - that's the appointment-cell's responsibility
     async fn calculate_theoretical_slots_for_schedule(
         &self,
@@ -472,7 +480,8 @@ pub fn new(config: &AppConfig) -> Self {
 
         // Generate morning slots if available
         if let (Some(morning_start), Some(morning_end)) = (schedule.morning_start_time, schedule.morning_end_time) {
-            let morning_slots = self.generate_slots_for_time_range(
+            let morning_slots = self.generate_enhanced_slots_for_time_range(
+                schedule,
                 date,
                 morning_start,
                 morning_end,
@@ -484,7 +493,8 @@ pub fn new(config: &AppConfig) -> Self {
 
         // Generate afternoon slots if available
         if let (Some(afternoon_start), Some(afternoon_end)) = (schedule.afternoon_start_time, schedule.afternoon_end_time) {
-            let afternoon_slots = self.generate_slots_for_time_range(
+            let afternoon_slots = self.generate_enhanced_slots_for_time_range(
+                schedule,
                 date,
                 afternoon_start,
                 afternoon_end,
@@ -497,6 +507,54 @@ pub fn new(config: &AppConfig) -> Self {
         Ok(slots)
     }
 
+    /// Enhanced slot generation with medical scheduling features
+    fn generate_enhanced_slots_for_time_range(
+        &self,
+        schedule: &DoctorAvailability,
+        date: NaiveDate,
+        start_time: DateTime<Utc>,
+        end_time: DateTime<Utc>,
+        duration_minutes: i32,
+        timezone: &str,
+    ) -> Result<Vec<AvailableSlot>> {
+        let mut slots = Vec::new();
+        
+        // Extract time components and combine with the target date
+        let start_naive_time = start_time.time();
+        let end_naive_time = end_time.time();
+        
+        let start_datetime = date.and_time(start_naive_time).and_utc();
+        let end_datetime = date.and_time(end_naive_time).and_utc();
+        
+        let mut current_time = start_datetime;
+        let total_duration = duration_minutes + schedule.buffer_minutes;
+
+        while current_time + Duration::minutes(total_duration as i64) <= end_datetime {
+            let slot_end = current_time + Duration::minutes(duration_minutes as i64);
+
+            // Determine slot priority based on appointment type and time
+            let slot_priority = self.calculate_slot_priority(&schedule.appointment_type, current_time);
+
+            slots.push(AvailableSlot {
+                start_time: current_time,
+                end_time: slot_end,
+                duration_minutes,
+                timezone: timezone.to_string(),
+                appointment_type: schedule.appointment_type.clone(),
+                buffer_minutes: schedule.buffer_minutes,
+                is_concurrent_available: schedule.max_concurrent_appointments > 1,
+                max_concurrent_patients: schedule.max_concurrent_appointments,
+                slot_priority,
+            });
+
+            // Move to next slot including buffer time
+            current_time += Duration::minutes(total_duration as i64);
+        }
+
+        Ok(slots)
+    }
+
+    /// Legacy slot generation for backwards compatibility
     fn generate_slots_for_time_range(
         &self,
         date: NaiveDate,
@@ -524,12 +582,42 @@ pub fn new(config: &AppConfig) -> Self {
                 end_time: slot_end,
                 duration_minutes,
                 timezone: timezone.to_string(),
+                appointment_type: AppointmentType::FollowUpConsultation, // Default
+                buffer_minutes: 10, // Default buffer
+                is_concurrent_available: false,
+                max_concurrent_patients: 1,
+                slot_priority: SlotPriority::Available,
             });
 
             current_time += Duration::minutes(duration_minutes as i64);
         }
 
         Ok(slots)
+    }
+
+    /// Calculate slot priority based on appointment type and time
+    fn calculate_slot_priority(&self, appointment_type: &AppointmentType, slot_time: DateTime<Utc>) -> SlotPriority {
+        use chrono::Timelike;
+        
+        // Priority based on appointment type
+        match appointment_type {
+            AppointmentType::EmergencyConsultation => SlotPriority::Emergency,
+            AppointmentType::InitialConsultation => SlotPriority::Preferred,
+            AppointmentType::SpecialtyConsultation => SlotPriority::Preferred,
+            _ => {
+                // Time-based priority - prefer morning slots and avoid lunch hours
+                let hour = slot_time.hour();
+                if hour < 9 || hour > 17 {
+                    SlotPriority::Limited
+                } else if hour >= 12 && hour <= 13 {
+                    SlotPriority::Limited  // Lunch hour
+                } else if hour >= 9 && hour <= 11 {
+                    SlotPriority::Preferred  // Morning preferred
+                } else {
+                    SlotPriority::Available
+                }
+            }
+        }
     }
 
     fn remove_overlapping_slots(&self, mut slots: Vec<AvailableSlot>) -> Vec<AvailableSlot> {

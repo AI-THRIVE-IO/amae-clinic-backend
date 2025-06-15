@@ -1,6 +1,6 @@
 // libs/appointment-cell/src/services/booking.rs
 use anyhow::Result;
-use chrono::{DateTime, Utc, Duration, NaiveTime};
+use chrono::{DateTime, Utc, Duration, NaiveTime, Timelike};
 use reqwest::Method;
 use serde_json::{json, Value};
 use tracing::{debug, info, warn};
@@ -10,7 +10,10 @@ use std::sync::Arc;
 use shared_config::AppConfig;
 use shared_database::supabase::SupabaseClient;
 use doctor_cell::services::matching::DoctorMatchingService;
-use doctor_cell::models::{DoctorMatchingRequest, DoctorMatch};
+use doctor_cell::models::{
+    DoctorMatchingRequest, DoctorMatch,
+    MedicalSchedulingConfig, SlotPriority
+};
 
 use crate::models::{
     Appointment, AppointmentStatus, AppointmentType, BookAppointmentRequest,
@@ -21,29 +24,63 @@ use crate::models::{
 };
 use crate::services::conflict::ConflictDetectionService;
 use crate::services::lifecycle::AppointmentLifecycleService;
+use crate::services::telemedicine::TelemedicineService;
 
 pub struct AppointmentBookingService {
     supabase: Arc<SupabaseClient>,
     conflict_service: ConflictDetectionService,
     lifecycle_service: AppointmentLifecycleService,
     doctor_matching_service: DoctorMatchingService,
+    telemedicine_service: TelemedicineService,
     validation_rules: AppointmentValidationRules,
+    medical_config: MedicalSchedulingConfig,
 }
 
 impl AppointmentBookingService {
     pub fn new(config: &AppConfig) -> Self {
         let supabase = Arc::new(SupabaseClient::new(config));
+        let medical_config = MedicalSchedulingConfig::default();
 
-        let conflict_service = ConflictDetectionService::new(Arc::clone(&supabase));
+        let conflict_service = ConflictDetectionService::with_config(
+            Arc::clone(&supabase),
+            medical_config.default_buffer_minutes,
+            true, // Enable concurrent appointments
+        );
         let lifecycle_service = AppointmentLifecycleService::new();
         let doctor_matching_service = DoctorMatchingService::new(config);
+        let telemedicine_service = TelemedicineService::new(Arc::clone(&supabase));
 
         Self {
             conflict_service,
             lifecycle_service,
             doctor_matching_service,
+            telemedicine_service,
             supabase,
             validation_rules: AppointmentValidationRules::default(),
+            medical_config,
+        }
+    }
+
+    pub fn with_medical_config(config: &AppConfig, medical_config: MedicalSchedulingConfig) -> Self {
+        let supabase = Arc::new(SupabaseClient::new(config));
+
+        let conflict_service = ConflictDetectionService::with_config(
+            Arc::clone(&supabase),
+            medical_config.default_buffer_minutes,
+            true,
+        );
+        let lifecycle_service = AppointmentLifecycleService::new();
+        let doctor_matching_service = DoctorMatchingService::new(config);
+        let telemedicine_service = TelemedicineService::new(Arc::clone(&supabase));
+
+        Self {
+            conflict_service,
+            lifecycle_service,
+            doctor_matching_service,
+            telemedicine_service,
+            supabase,
+            validation_rules: AppointmentValidationRules::default(),
+            medical_config,
         }
     }
 
@@ -83,8 +120,8 @@ impl AppointmentBookingService {
         // **Step 5: Book the Appointment**
         let appointment = self.book_appointment(booking_request, auth_token).await?;
         
-        // **Step 6: Generate Alternative Slots**
-        let alternative_slots = self.generate_alternative_slots(
+        // **Step 6: Generate Prioritized Alternative Slots**
+        let alternative_slots = self.generate_prioritized_alternative_slots(
             &request, 
             &doctor_match.doctor.id, 
             auth_token
@@ -115,8 +152,8 @@ impl AppointmentBookingService {
         info!("Booking appointment for patient {} with doctor {:?}", 
               request.patient_id, request.doctor_id);
 
-        // **Step 1: Comprehensive Validation**
-        self.validate_booking_request(&request).await?;
+        // **Step 1: Enhanced Medical Validation**
+        self.validate_enhanced_booking_request(&request, auth_token).await?;
         
         // **Step 2: Verify Patient Exists**
         self.verify_patient_exists(&request.patient_id, auth_token).await?;
@@ -131,26 +168,58 @@ impl AppointmentBookingService {
             self.find_best_available_doctor(&request, auth_token).await?
         };
         
-        // **Step 4: Detect Conflicts**
-        let end_time = request.appointment_date + Duration::minutes(request.duration_minutes as i64);
-        let conflict_check = self.conflict_service.check_conflicts(
+        // **Step 4: Enhanced Conflict Detection with Buffer Times**
+        let (duration_minutes, buffer_minutes) = self.get_appointment_timing(&request.appointment_type);
+        let actual_duration = if request.duration_minutes > 0 {
+            request.duration_minutes
+        } else {
+            duration_minutes
+        };
+        
+        let end_time = request.appointment_date + Duration::minutes(actual_duration as i64);
+        
+        // Use enhanced conflict detection with appointment type awareness
+        let conflict_check = self.conflict_service.check_conflicts_with_details(
             selected_doctor_id,
             request.appointment_date,
             end_time,
             None,
+            Some(request.appointment_type.clone()),
+            Some(buffer_minutes),
             auth_token,
         ).await?;
 
         if conflict_check.has_conflict {
-            warn!("Appointment conflict detected for doctor {} at {}", 
-                  selected_doctor_id, request.appointment_date);
+            warn!("Enhanced appointment conflict detected for doctor {} at {} for type {:?}", 
+                  selected_doctor_id, request.appointment_date, request.appointment_type);
+            
+            // Check if it's a concurrent appointment capacity issue
+            if self.supports_concurrent_appointments(&request.appointment_type) {
+                let has_capacity = self.conflict_service.check_concurrent_capacity(
+                    selected_doctor_id,
+                    request.appointment_date,
+                    end_time,
+                    &request.appointment_type,
+                    None,
+                    auth_token,
+                ).await?;
+                
+                if !has_capacity {
+                    info!("Concurrent appointment capacity exceeded for doctor {}", selected_doctor_id);
+                }
+            }
+            
             return Err(AppointmentError::ConflictDetected);
         }
 
-        // **Step 5: Create Appointment Record**
-        let appointment = self.create_appointment_record(
+        // **Step 5: Create Enhanced Appointment Record**
+        let mut enhanced_request = request;
+        enhanced_request.duration_minutes = actual_duration;
+        
+        let appointment = self.create_enhanced_appointment_record(
             selected_doctor_id,
-            request,
+            enhanced_request,
+            buffer_minutes,
             auth_token,
         ).await?;
 
@@ -471,6 +540,60 @@ impl AppointmentBookingService {
             .await
     }
 
+    /// Public method to start a telemedicine session
+    pub async fn start_telemedicine_session(
+        &self,
+        appointment_id: Uuid,
+        participant_type: crate::services::telemedicine::ParticipantType,
+        auth_token: &str,
+    ) -> Result<crate::services::telemedicine::TelemedicineSessionInfo, AppointmentError> {
+        self.telemedicine_service
+            .start_telemedicine_appointment(appointment_id, participant_type, auth_token)
+            .await
+    }
+
+    /// Public method to send pre-appointment telemedicine instructions
+    pub async fn send_telemedicine_instructions(
+        &self,
+        appointment_id: Uuid,
+        auth_token: &str,
+    ) -> Result<(), AppointmentError> {
+        let appointment = self.get_appointment(appointment_id, auth_token).await?;
+        self.telemedicine_service
+            .send_pre_appointment_instructions(&appointment, auth_token)
+            .await
+    }
+
+    /// Public method to validate patient telemedicine readiness
+    pub async fn check_telemedicine_readiness(
+        &self,
+        patient_id: Uuid,
+        appointment_type: &AppointmentType,
+        auth_token: &str,
+    ) -> Result<crate::services::telemedicine::TelemedicineReadinessReport, AppointmentError> {
+        self.telemedicine_service
+            .validate_patient_telemedicine_readiness(patient_id, appointment_type, auth_token)
+            .await
+    }
+
+    /// Get medical scheduling configuration
+    pub fn get_medical_scheduling_config(&self) -> &MedicalSchedulingConfig {
+        &self.medical_config
+    }
+
+    /// Get enhanced appointment timing with medical scheduling rules
+    pub fn get_enhanced_appointment_timing(&self, appointment_type: &AppointmentType) -> (i32, i32, SlotPriority) {
+        let (duration, buffer) = self.get_appointment_timing(appointment_type);
+        let priority = match appointment_type {
+            AppointmentType::Urgent => SlotPriority::Emergency,
+            AppointmentType::MentalHealth => SlotPriority::Preferred,
+            AppointmentType::WomensHealth => SlotPriority::Preferred,
+            _ => SlotPriority::Available,
+        };
+        
+        (duration, buffer, priority)
+    }
+
     // ==============================================================================
     // PRIVATE HELPER METHODS - ENHANCED WITH HISTORY PRIORITIZATION
     // ==============================================================================
@@ -547,7 +670,93 @@ impl AppointmentBookingService {
         Ok(&doctor_match.available_slots[0])
     }
 
-    /// NEW: Generate alternative appointment slots
+    /// NEW: Generate prioritized alternative appointment slots
+    async fn generate_prioritized_alternative_slots(
+        &self,
+        request: &SmartBookingRequest,
+        exclude_doctor_id: &Uuid,
+        auth_token: &str,
+    ) -> Result<Vec<AlternativeSlot>, AppointmentError> {
+        debug!("Generating prioritized alternative slots for patient {}", request.patient_id);
+
+        let matching_request = DoctorMatchingRequest {
+            patient_id: request.patient_id,
+            preferred_date: request.preferred_date,
+            preferred_time_start: request.preferred_time_start,
+            preferred_time_end: request.preferred_time_end,
+            specialty_required: request.specialty_required.clone(),
+            appointment_type: request.appointment_type.to_string(),
+            duration_minutes: request.duration_minutes,
+            timezone: request.timezone.clone(),
+        };
+
+        let matches = self.doctor_matching_service
+            .find_matching_doctors(matching_request, auth_token, Some(8))
+            .await
+            .map_err(|e| AppointmentError::DoctorMatchingError(e.to_string()))?;
+
+        let mut alternatives = Vec::new();
+        for doctor_match in matches {
+            if doctor_match.doctor.id == *exclude_doctor_id {
+                continue; // Skip the already selected doctor
+            }
+
+            for slot in doctor_match.available_slots.iter().take(3) { // Max 3 slots per doctor
+                let has_history = doctor_match.match_reasons.iter()
+                    .any(|reason| reason.contains("Previous patient"));
+
+                // Calculate slot priority based on medical scheduling logic
+                let slot_priority = self.calculate_slot_priority(
+                    slot.start_time,
+                    &request.appointment_type,
+                    0.5, // Assume moderate availability density
+                );
+
+                let mut alternative = AlternativeSlot {
+                    doctor_id: doctor_match.doctor.id,
+                    doctor_first_name: doctor_match.doctor.first_name.clone(),
+                    doctor_last_name: doctor_match.doctor.last_name.clone(),
+                    start_time: slot.start_time,
+                    end_time: slot.end_time,
+                    match_score: doctor_match.match_score,
+                    has_patient_history: has_history,
+                };
+
+                // Boost match score based on slot priority
+                match slot_priority {
+                    SlotPriority::Emergency => alternative.match_score += 0.3,
+                    SlotPriority::Preferred => alternative.match_score += 0.2,
+                    SlotPriority::Available => alternative.match_score += 0.1,
+                    SlotPriority::Limited => alternative.match_score += 0.05,
+                    SlotPriority::WaitList => alternative.match_score -= 0.1,
+                }
+
+                alternatives.push(alternative);
+            }
+        }
+
+        // Enhanced sorting by medical scheduling priority
+        alternatives.sort_by(|a, b| {
+            // First priority: patient history
+            match (a.has_patient_history, b.has_patient_history) {
+                (true, false) => return std::cmp::Ordering::Less,
+                (false, true) => return std::cmp::Ordering::Greater,
+                _ => {}
+            }
+            
+            // Second priority: match score (now includes slot priority)
+            b.match_score.partial_cmp(&a.match_score).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        
+        alternatives.truncate(12); // Limit to 12 prioritized alternatives
+
+        info!("Generated {} prioritized alternative slots for patient {}", 
+              alternatives.len(), request.patient_id);
+
+        Ok(alternatives)
+    }
+
+    /// Legacy method for backward compatibility
     async fn generate_alternative_slots(
         &self,
         request: &SmartBookingRequest,
@@ -841,8 +1050,28 @@ impl AppointmentBookingService {
         request: BookAppointmentRequest,
         auth_token: &str,
     ) -> Result<Appointment, AppointmentError> {
+        let (_, buffer_minutes) = self.get_appointment_timing(&request.appointment_type);
+        self.create_enhanced_appointment_record(doctor_id, request, buffer_minutes, auth_token).await
+    }
+
+    async fn create_enhanced_appointment_record(
+        &self,
+        doctor_id: Uuid,
+        request: BookAppointmentRequest,
+        buffer_minutes: i32,
+        auth_token: &str,
+    ) -> Result<Appointment, AppointmentError> {
         let end_time = request.appointment_date + Duration::minutes(request.duration_minutes as i64);
         let now = Utc::now();
+
+        // Generate video conference link for telemedicine appointments
+        let video_conference_link = self.telemedicine_service
+            .generate_video_conference_link(
+                Uuid::new_v4(), // Temporary ID, will be replaced with actual appointment ID
+                &request.appointment_type, 
+                request.duration_minutes
+            ).await
+            .map_err(|e| AppointmentError::ExternalServiceError(e.to_string()))?;
 
         let appointment_data = json!({
             "patient_id": request.patient_id,
@@ -855,6 +1084,7 @@ impl AppointmentBookingService {
             "scheduled_start_time": request.appointment_date.to_rfc3339(),
             "scheduled_end_time": end_time.to_rfc3339(),
             "patient_notes": request.patient_notes,
+            "video_conference_link": video_conference_link,
             "prescription_issued": false,
             "medical_certificate_issued": false,
             "report_generated": false,
@@ -879,6 +1109,9 @@ impl AppointmentBookingService {
 
         let appointment: Appointment = serde_json::from_value(result[0].clone())
             .map_err(|e| AppointmentError::DatabaseError(format!("Failed to parse created appointment: {}", e)))?;
+
+        info!("Enhanced appointment created: {} with type {:?}, duration {} min, buffer {} min", 
+              appointment.id, request.appointment_type, request.duration_minutes, buffer_minutes);
 
         Ok(appointment)
     }
@@ -1023,6 +1256,166 @@ impl AppointmentBookingService {
         
         debug!("Post-cancellation tasks completed for appointment {} (cancelled by {:?})", 
                appointment.id, request.cancelled_by);
+        Ok(())
+    }
+
+    // ==============================================================================
+    // ENHANCED MEDICAL SCHEDULING HELPER METHODS
+    // ==============================================================================
+
+    /// Get appointment timing parameters based on type
+    fn get_appointment_timing(&self, appointment_type: &AppointmentType) -> (i32, i32) {
+        match appointment_type {
+            AppointmentType::GeneralConsultation => (30, 10),
+            AppointmentType::FollowUp => (20, 10),
+            AppointmentType::Prescription => (15, 5),
+            AppointmentType::MedicalCertificate => (10, 5),
+            AppointmentType::Urgent => (30, 5),
+            AppointmentType::MentalHealth => (45, 15),
+            AppointmentType::WomensHealth => (30, 10),
+        }
+    }
+
+    /// Check if appointment type supports concurrent scheduling
+    fn supports_concurrent_appointments(&self, appointment_type: &AppointmentType) -> bool {
+        matches!(
+            appointment_type,
+            AppointmentType::GeneralConsultation |
+            AppointmentType::FollowUp |
+            AppointmentType::MentalHealth
+        )
+    }
+
+
+    /// Get appointment priority score for scheduling optimization
+    fn get_appointment_priority(&self, appointment_type: &AppointmentType, has_patient_history: bool) -> i32 {
+        let base_priority = match appointment_type {
+            AppointmentType::Urgent => 100,
+            AppointmentType::MentalHealth => 80,
+            AppointmentType::WomensHealth => 70,
+            AppointmentType::GeneralConsultation => 60,
+            AppointmentType::FollowUp => 50,
+            AppointmentType::MedicalCertificate => 30,
+            AppointmentType::Prescription => 20,
+        };
+
+        // Boost priority for patients with existing doctor relationship
+        if has_patient_history {
+            base_priority + 20
+        } else {
+            base_priority
+        }
+    }
+
+    /// Validate telemedicine appointment requirements using telemedicine service
+    async fn validate_telemedicine_requirements(
+        &self,
+        appointment_type: &AppointmentType,
+        patient_id: &Uuid,
+        auth_token: &str,
+    ) -> Result<(), AppointmentError> {
+        // Only validate for telemedicine-capable appointments
+        if !self.is_telemedicine_capable(appointment_type) {
+            return Ok(());
+        }
+
+        // Use telemedicine service for comprehensive validation
+        let readiness_report = self.telemedicine_service
+            .validate_patient_telemedicine_readiness(*patient_id, appointment_type, auth_token)
+            .await?;
+
+        if !readiness_report.is_ready {
+            let issues = readiness_report.recommendations.join("; ");
+            return Err(AppointmentError::ValidationError(
+                format!("Telemedicine readiness issues: {}", issues)
+            ));
+        }
+
+        if readiness_report.technical_support_needed {
+            info!("Patient {} will need technical support for telemedicine appointment", patient_id);
+        }
+
+        Ok(())
+    }
+
+    /// Check if appointment type is telemedicine capable
+    fn is_telemedicine_capable(&self, appointment_type: &AppointmentType) -> bool {
+        matches!(
+            appointment_type,
+            AppointmentType::GeneralConsultation |
+            AppointmentType::FollowUp |
+            AppointmentType::MentalHealth |
+            AppointmentType::WomensHealth |
+            AppointmentType::Prescription
+        )
+    }
+
+    /// Calculate optimal slot priority for scheduling
+    fn calculate_slot_priority(
+        &self,
+        slot_time: DateTime<Utc>,
+        appointment_type: &AppointmentType,
+        doctor_availability_density: f32,
+    ) -> SlotPriority {
+        let hour = slot_time.hour();
+        
+        // Emergency appointments get highest priority
+        if matches!(appointment_type, AppointmentType::Urgent) {
+            return SlotPriority::Emergency;
+        }
+
+        // Consider peak hours and availability density
+        let is_peak_hour = (hour >= 9 && hour <= 11) || (hour >= 14 && hour <= 16);
+        
+        if doctor_availability_density > 0.9 {
+            SlotPriority::WaitList
+        } else if doctor_availability_density > 0.8 {
+            SlotPriority::Limited
+        } else if is_peak_hour && doctor_availability_density > 0.6 {
+            SlotPriority::Limited
+        } else if hour >= 9 && hour <= 17 {
+            SlotPriority::Preferred
+        } else {
+            SlotPriority::Available
+        }
+    }
+
+    /// Enhanced appointment validation with medical scheduling rules
+    async fn validate_enhanced_booking_request(
+        &self,
+        request: &BookAppointmentRequest,
+        auth_token: &str,
+    ) -> Result<(), AppointmentError> {
+        // Standard validation
+        self.validate_booking_request(request).await?;
+        
+        // Telemedicine validation
+        self.validate_telemedicine_requirements(&request.appointment_type, &request.patient_id, auth_token).await?;
+        
+        // Medical scheduling specific validation
+        let (default_duration, _) = self.get_appointment_timing(&request.appointment_type);
+        
+        // Validate duration is appropriate for appointment type
+        if request.duration_minutes > 0 && request.duration_minutes < default_duration / 2 {
+            return Err(AppointmentError::ValidationError(
+                format!("Duration too short for {:?} appointment type", request.appointment_type)
+            ));
+        }
+        
+        // Validate maximum duration limits
+        let max_duration = match request.appointment_type {
+            AppointmentType::MentalHealth => 90,
+            AppointmentType::WomensHealth => 60,
+            AppointmentType::GeneralConsultation => 60,
+            _ => default_duration * 2,
+        };
+        
+        if request.duration_minutes > max_duration {
+            return Err(AppointmentError::ValidationError(
+                format!("Duration exceeds maximum for {:?} appointment type", request.appointment_type)
+            ));
+        }
+        
         Ok(())
     }
 }

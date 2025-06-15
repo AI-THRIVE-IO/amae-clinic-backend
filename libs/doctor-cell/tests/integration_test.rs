@@ -35,18 +35,15 @@ async fn setup_get_available_slots_mocks(mock_server: &MockServer, doctor_id: &s
         .and(query_param_contains("is_available", "eq.true"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!([
             {
-                "start_time": "2024-01-01T09:00:00Z",
-                "end_time": "2024-01-01T10:00:00Z",
-                "duration_minutes": 60,
-                "appointment_type": "consultation",
-                "timezone": "UTC"
-            },
-            {
                 "start_time": "2024-01-01T10:00:00Z",
-                "end_time": "2024-01-01T11:00:00Z",
-                "duration_minutes": 60,
-                "appointment_type": "consultation",
-                "timezone": "UTC"
+                "end_time": "2024-01-01T10:30:00Z",
+                "duration_minutes": 30,
+                "timezone": "UTC",
+                "appointment_type": "FollowUpConsultation",
+                "buffer_minutes": 10,
+                "is_concurrent_available": false,
+                "max_concurrent_patients": 1,
+                "slot_priority": "Available"
             }
         ])))
         .mount(mock_server)
@@ -220,7 +217,13 @@ async fn test_get_doctor_availability_public() {
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
+    let status = response.status();
+    if status != StatusCode::OK {
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body_str = String::from_utf8_lossy(&body);
+        println!("Error response ({}): {}", status, body_str);
+    }
+    assert_eq!(status, StatusCode::OK);
 }
 
 #[tokio::test]
@@ -358,7 +361,12 @@ async fn test_create_availability_success() {
         "morning_end_time": "2024-01-01T12:00:00Z",
         "afternoon_start_time": "2024-01-01T13:00:00Z",
         "afternoon_end_time": "2024-01-01T17:00:00Z",
-        "is_available": true
+        "is_available": true,
+        "appointment_type": "FollowUpConsultation",
+        "buffer_minutes": 10,
+        "max_concurrent_appointments": 1,
+        "is_recurring": true,
+        "specific_date": null
     });
 
     let request = Request::builder()

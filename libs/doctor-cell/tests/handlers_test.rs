@@ -77,7 +77,7 @@ fn create_complete_availability_response(id: &str, doctor_id: &str, day_of_week:
         "end_time": "17:00:00",
         "duration_minutes": 30,
         "timezone": "UTC",
-        "appointment_type": "consultation",
+        "appointment_type": "FollowUpConsultation",
         "buffer_minutes": 0,
         "max_concurrent_appointments": 1,
         "is_recurring": true,
@@ -245,7 +245,7 @@ async fn setup_matching_service_mocks(mock_server: &MockServer, user_id: &str, s
                 "end_time": "17:00:00",
                 "duration_minutes": 30,
                 "is_available": true,
-                "appointment_type": "consultation",
+                "appointment_type": "FollowUpConsultation",
                 "timezone": "UTC",
                 "created_at": "2024-01-01T00:00:00Z"
             }
@@ -283,7 +283,7 @@ async fn test_debug_actual_requests() {
             preferred_time_start: Some(NaiveTime::from_hms_opt(9, 0, 0).unwrap()),
             preferred_time_end: Some(NaiveTime::from_hms_opt(17, 0, 0).unwrap()),
             specialty_required: None,
-            appointment_type: "consultation".to_string(),
+            appointment_type: "FollowUpConsultation".to_string(),
             duration_minutes: 30,
             timezone: "UTC".to_string(),
             max_results: Some(5),
@@ -687,8 +687,11 @@ async fn test_get_available_slots() {
         axum::extract::Query(AvailabilityQuery {
             date: NaiveDate::from_ymd_opt(2024, 12, 25).unwrap().to_string(),
             timezone: Some("UTC".to_string()),
-            appointment_type: Some("consultation".to_string()),
+            appointment_type: Some(AppointmentType::FollowUpConsultation),
             duration_minutes: Some(30),
+            patient_id: None,
+            include_concurrent: Some(false),
+            priority_filter: None,
         }),
         create_auth_header(&token)
     ).await;
@@ -715,6 +718,12 @@ async fn test_create_availability_as_doctor() {
         afternoon_start_time: Some(Utc::now().date_naive().and_time(NaiveTime::from_hms_opt(13, 0, 0).unwrap()).and_utc()),
         afternoon_end_time: Some(Utc::now().date_naive().and_time(NaiveTime::from_hms_opt(17, 0, 0).unwrap()).and_utc()),
         is_available: Some(true),
+        // Enhanced medical scheduling fields
+        appointment_type: AppointmentType::FollowUpConsultation,
+        buffer_minutes: Some(10),
+        max_concurrent_appointments: Some(1),
+        is_recurring: Some(true),
+        specific_date: None,
     };
 
     // FIXED: Setup correct mocks using appointment_availabilities table
@@ -749,6 +758,12 @@ async fn test_create_availability_unauthorized() {
         afternoon_start_time: Some(Utc::now().date_naive().and_time(NaiveTime::from_hms_opt(13, 0, 0).unwrap()).and_utc()),
         afternoon_end_time: Some(Utc::now().date_naive().and_time(NaiveTime::from_hms_opt(17, 0, 0).unwrap()).and_utc()),
         is_available: Some(true),
+        // Enhanced medical scheduling fields
+        appointment_type: AppointmentType::FollowUpConsultation,
+        buffer_minutes: Some(10),
+        max_concurrent_appointments: Some(1),
+        is_recurring: Some(true),
+        specific_date: None,
     };
 
     let result = create_availability(
@@ -787,7 +802,7 @@ async fn test_find_matching_doctors_no_specialty() {
             preferred_time_start: Some(NaiveTime::from_hms_opt(9, 0, 0).unwrap()),
             preferred_time_end: Some(NaiveTime::from_hms_opt(17, 0, 0).unwrap()),
             specialty_required: None,
-            appointment_type: "consultation".to_string(),
+            appointment_type: "FollowUpConsultation".to_string(),
             duration_minutes: 30,
             timezone: "UTC".to_string(),
             max_results: Some(5),

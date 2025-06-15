@@ -23,7 +23,7 @@ use crate::models::{
     CreateDoctorRequest, UpdateDoctorRequest, DoctorSearchFilters,
     CreateAvailabilityRequest, UpdateAvailabilityRequest, AvailabilityQueryRequest,
     DoctorImageUpload, DoctorMatchingRequest, CreateSpecialtyRequest,
-    CreateAvailabilityOverrideRequest,
+    CreateAvailabilityOverrideRequest, AppointmentType, SlotPriority,
 };
 
 use crate::models::DoctorError;
@@ -43,8 +43,11 @@ pub struct DoctorSearchQuery {
 pub struct AvailabilityQuery {
     pub date: String,
     pub timezone: Option<String>,
-    pub appointment_type: Option<String>,
+    pub appointment_type: Option<AppointmentType>,
     pub duration_minutes: Option<i32>,
+    pub patient_id: Option<String>,
+    pub include_concurrent: Option<bool>,
+    pub priority_filter: Option<SlotPriority>,
 }
 
 #[derive(Debug, Deserialize)]
