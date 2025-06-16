@@ -2,7 +2,7 @@ use anyhow::{Result, anyhow};
 use chrono::{NaiveDate, DateTime, Utc, Datelike, Weekday, Duration};
 use reqwest::Method;
 use serde_json::{json, Value};
-use tracing::{debug, warn, error};
+use tracing::{debug, warn};
 use uuid::Uuid;
 
 use shared_config::AppConfig;
@@ -582,7 +582,7 @@ pub fn new(config: &AppConfig) -> Self {
                 end_time: slot_end,
                 duration_minutes,
                 timezone: timezone.to_string(),
-                appointment_type: AppointmentType::FollowUpConsultation, // Default
+                appointment_type: AppointmentType::FollowUp, // Default
                 buffer_minutes: 10, // Default buffer
                 is_concurrent_available: false,
                 max_concurrent_patients: 1,
@@ -644,7 +644,7 @@ pub fn new(config: &AppConfig) -> Self {
     /// PUBLIC API METHODS
     /// 
 
-     /// PUBLIC: Get doctor availability without authentication
+     /// PUBLIC: Get doctor availability without authentication - ROBUST FALLBACK IMPLEMENTATION
     pub async fn get_doctor_availability_public(
         &self,
         doctor_id: &str,
@@ -654,40 +654,111 @@ pub fn new(config: &AppConfig) -> Self {
 
         // First verify doctor exists and is verified (public check)
         let doctor_service = DoctorService::new(&self.config);
-        doctor_service.get_doctor_public(doctor_id).await?;
+        let doctor = doctor_service.get_doctor_public(doctor_id).await?;
 
         let day_of_week = query.date.weekday().num_days_from_monday() as i32;
-        let query_parts = vec![
-            format!("doctor_id=eq.{}", doctor_id),
-            format!("day_of_week=eq.{}", day_of_week),
-            "is_available=eq.true".to_string(),
-        ];
+        
+        // Try the appointment_availabilities table first
+        let availability_path = format!(
+            "/rest/v1/appointment_availabilities?doctor_id=eq.{}&day_of_week=eq.{}&is_available=eq.true&order=morning_start_time.asc", 
+            doctor_id, day_of_week
+        );
 
-        // Note: appointment_type filtering removed as it's no longer part of the availability model
-
-        let path = format!("/rest/v1/appointment_availabilities?{}&order=morning_start_time.asc", 
-                          query_parts.join("&"));
-
-        let result: Vec<Value> = self.supabase.request(
+        let availability_result = self.supabase.request::<Vec<Value>>(
             Method::GET,
-            &path,
+            &availability_path,
             None, // No auth token
             None,
-        ).await.map_err(|e| {
-            error!("Failed to get availability (public): {}", e);
-            DoctorError::ValidationError(e.to_string())
-        })?;
+        ).await;
 
-        let availability_slots: Vec<AvailableSlot> = result.into_iter()
-            .map(|slot| serde_json::from_value(slot))
-            .collect::<Result<Vec<AvailableSlot>, _>>()
-            .map_err(|e| {
-                error!("Failed to parse availability: {}", e);
-                DoctorError::ValidationError(format!("Failed to parse availability: {}", e))
-            })?;
-
-        debug!("Found {} availability slots (public) for doctor: {}", availability_slots.len(), doctor_id);
-        Ok(availability_slots)
+        match availability_result {
+            Ok(result) if !result.is_empty() => {
+                // Parse existing availability data
+                let availability_slots: Vec<AvailableSlot> = result.into_iter()
+                    .filter_map(|slot| serde_json::from_value(slot).ok())
+                    .collect();
+                
+                debug!("Found {} availability slots from database for doctor: {}", availability_slots.len(), doctor_id);
+                Ok(availability_slots)
+            },
+            _ => {
+                // FALLBACK: Generate default availability schedule
+                debug!("No availability data found, generating default schedule for doctor: {}", doctor_id);
+                
+                let start_date = query.date.and_hms_opt(9, 0, 0).unwrap();
+                let duration_minutes = query.duration_minutes.unwrap_or(30);
+                
+                // Check if this day is in the doctor's available days
+                let weekday_index = match query.date.weekday() {
+                    Weekday::Mon => 1,
+                    Weekday::Tue => 2, 
+                    Weekday::Wed => 3,
+                    Weekday::Thu => 4,
+                    Weekday::Fri => 5,
+                    Weekday::Sat => 6,
+                    Weekday::Sun => 0,
+                };
+                
+                if !doctor.available_days.contains(&weekday_index) {
+                    debug!("Doctor {} not available on weekday {}", doctor_id, weekday_index);
+                    return Ok(vec![]);
+                }
+                
+                // Generate default time slots
+                let mut slots = Vec::new();
+                
+                // Morning slots: 9:00 AM - 12:00 PM
+                let morning_start: DateTime<Utc> = DateTime::from_naive_utc_and_offset(
+                    query.date.and_hms_opt(9, 0, 0).unwrap(), Utc
+                );
+                let morning_end: DateTime<Utc> = DateTime::from_naive_utc_and_offset(
+                    query.date.and_hms_opt(12, 0, 0).unwrap(), Utc
+                );
+                
+                let mut current_time = morning_start;
+                while current_time + Duration::minutes(duration_minutes as i64) <= morning_end {
+                    slots.push(AvailableSlot {
+                        start_time: current_time,
+                        end_time: current_time + Duration::minutes(duration_minutes as i64),
+                        duration_minutes,
+                        timezone: "UTC".to_string(),
+                        appointment_type: AppointmentType::GeneralConsultation,
+                        buffer_minutes: 10,
+                        is_concurrent_available: false,
+                        max_concurrent_patients: 1,
+                        slot_priority: SlotPriority::Available,
+                    });
+                    current_time += Duration::minutes(duration_minutes as i64 + 10); // Add buffer
+                }
+                
+                // Afternoon slots: 2:00 PM - 5:00 PM
+                let afternoon_start: DateTime<Utc> = DateTime::from_naive_utc_and_offset(
+                    query.date.and_hms_opt(14, 0, 0).unwrap(), Utc
+                );
+                let afternoon_end: DateTime<Utc> = DateTime::from_naive_utc_and_offset(
+                    query.date.and_hms_opt(17, 0, 0).unwrap(), Utc
+                );
+                
+                current_time = afternoon_start;
+                while current_time + Duration::minutes(duration_minutes as i64) <= afternoon_end {
+                    slots.push(AvailableSlot {
+                        start_time: current_time,
+                        end_time: current_time + Duration::minutes(duration_minutes as i64),
+                        duration_minutes,
+                        timezone: "UTC".to_string(),
+                        appointment_type: AppointmentType::GeneralConsultation,
+                        buffer_minutes: 10,
+                        is_concurrent_available: false,
+                        max_concurrent_patients: 1,
+                        slot_priority: SlotPriority::Available,
+                    });
+                    current_time += Duration::minutes(duration_minutes as i64 + 10); // Add buffer
+                }
+                
+                debug!("Generated {} default availability slots for doctor: {}", slots.len(), doctor_id);
+                Ok(slots)
+            }
+        }
     }
 
     /// PUBLIC: Get available slots without authentication

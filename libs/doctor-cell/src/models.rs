@@ -5,18 +5,27 @@ use chrono::{DateTime, Utc, NaiveTime, NaiveDate, Datelike, Timelike};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Doctor {
     pub id: Uuid,
+    pub user_id: Option<String>,        // Link to auth user
     pub first_name: String,
     pub last_name: String,
     pub email: String,
+    pub phone_number: Option<String>,   // Phone contact
     pub specialty: String,
     pub sub_specialty: Option<String>,
     pub bio: Option<String>,
     pub profile_image_url: Option<String>,
     pub license_number: String,
     pub years_experience: Option<i32>,
+    pub medical_school: Option<String>, // Education field
+    pub residency: Option<String>,      // Training info
+    pub certifications: Option<Vec<String>>, // Professional certifications
+    pub languages: Option<Vec<String>>, // Languages spoken
+    pub consultation_fee: Option<f64>,  // Pricing
+    pub emergency_fee: Option<f64>,     // Emergency pricing
     pub timezone: Option<String>,
     pub is_verified: bool,
     pub is_available: bool,
+    pub accepts_insurance: Option<bool>, // Insurance acceptance
     pub rating: f32,
     pub total_consultations: i32,
     pub max_daily_appointments: Option<i32>,
@@ -275,18 +284,27 @@ pub struct DoctorSearchFilters {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateDoctorRequest {
+    pub user_id: Option<String>,        // Optional for admin creation
     pub first_name: String,
     pub last_name: String,
     pub email: String,
+    pub phone: Option<String>,          // Support phone field from curl
     pub specialty: String,
     pub sub_specialty: Option<String>,
     pub bio: Option<String>,
     pub license_number: String,
-    pub years_experience: Option<i32>,
+    pub years_experience: Option<i32>,  // Map to years_of_experience in curl
+    pub education: Option<String>,      // Support education field from curl
+    pub certifications: Option<Vec<String>>, // Support certifications array from curl
+    pub languages: Option<Vec<String>>, // Support languages array from curl
+    pub consultation_fee: Option<f64>,  // Support consultation_fee from curl
+    pub emergency_fee: Option<f64>,     // Support emergency_fee from curl
     pub timezone: Option<String>,
     pub max_daily_appointments: Option<i32>,
     pub available_days: Option<Vec<i32>>,
-    pub date_of_birth: NaiveDate,
+    pub date_of_birth: Option<NaiveDate>, // Make optional with reasonable default
+    pub is_available: Option<bool>,     // Support is_available from curl
+    pub accepts_insurance: Option<bool>, // Support accepts_insurance from curl
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -439,26 +457,38 @@ impl std::fmt::Display for DoctorError {
 
 impl std::error::Error for DoctorError {}
 
-// Enhanced Medical Appointment Types
+// Enhanced Medical Appointment Types - SYNCHRONIZED WITH APPOINTMENT-CELL
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum AppointmentType {
-    InitialConsultation,    // 45-60 minutes, new patients, higher priority
-    FollowUpConsultation,   // 15-30 minutes, existing patients
-    EmergencyConsultation,  // 15-45 minutes, urgent care, highest priority
-    PrescriptionRenewal,    // 10-15 minutes, medication management
-    SpecialtyConsultation,  // 30-60 minutes, specialist referrals
-    GroupSession,           // 60-90 minutes, multiple patients
-    TelehealthCheckIn,      // 10-15 minutes, remote monitoring
+    GeneralConsultation,    // Maps to appointment-cell::GeneralConsultation
+    FollowUp,              // Maps to appointment-cell::FollowUp  
+    Prescription,          // Maps to appointment-cell::Prescription
+    MedicalCertificate,    // Maps to appointment-cell::MedicalCertificate
+    Urgent,                // Maps to appointment-cell::Urgent
+    MentalHealth,          // Maps to appointment-cell::MentalHealth
+    WomensHealth,          // Maps to appointment-cell::WomensHealth
+    // Enhanced types for doctor scheduling
+    InitialConsultation,   // 45-60 minutes, new patients, higher priority
+    SpecialtyConsultation, // 30-60 minutes, specialist referrals
+    EmergencyConsultation, // 15-45 minutes, urgent care, highest priority
+    GroupSession,          // 60-90 minutes, multiple patients
+    TelehealthCheckIn,     // 10-15 minutes, remote monitoring
 }
 
 impl AppointmentType {
     pub fn default_duration_minutes(&self) -> i32 {
         match self {
+            AppointmentType::GeneralConsultation => 30,
+            AppointmentType::FollowUp => 20,
+            AppointmentType::Prescription => 15,
+            AppointmentType::MedicalCertificate => 15,
+            AppointmentType::Urgent => 30,
+            AppointmentType::MentalHealth => 45,
+            AppointmentType::WomensHealth => 30,
             AppointmentType::InitialConsultation => 45,
-            AppointmentType::FollowUpConsultation => 20,
-            AppointmentType::EmergencyConsultation => 30,
-            AppointmentType::PrescriptionRenewal => 10,
             AppointmentType::SpecialtyConsultation => 45,
+            AppointmentType::EmergencyConsultation => 30,
             AppointmentType::GroupSession => 60,
             AppointmentType::TelehealthCheckIn => 15,
         }
@@ -466,11 +496,16 @@ impl AppointmentType {
 
     pub fn default_buffer_minutes(&self) -> i32 {
         match self {
+            AppointmentType::GeneralConsultation => 10,
+            AppointmentType::FollowUp => 10,
+            AppointmentType::Prescription => 5,
+            AppointmentType::MedicalCertificate => 5,
+            AppointmentType::Urgent => 5,
+            AppointmentType::MentalHealth => 15,
+            AppointmentType::WomensHealth => 10,
             AppointmentType::InitialConsultation => 15,  // More time for documentation
-            AppointmentType::FollowUpConsultation => 10,
-            AppointmentType::EmergencyConsultation => 5,  // Quick turnaround needed
-            AppointmentType::PrescriptionRenewal => 5,
             AppointmentType::SpecialtyConsultation => 15,
+            AppointmentType::EmergencyConsultation => 5,  // Quick turnaround needed
             AppointmentType::GroupSession => 20,  // Cleanup time
             AppointmentType::TelehealthCheckIn => 5,
         }
@@ -483,11 +518,16 @@ impl AppointmentType {
     pub fn priority_score(&self) -> i32 {
         match self {
             AppointmentType::EmergencyConsultation => 100,
+            AppointmentType::Urgent => 90,
             AppointmentType::InitialConsultation => 80,
             AppointmentType::SpecialtyConsultation => 70,
-            AppointmentType::FollowUpConsultation => 60,
+            AppointmentType::FollowUp => 60,
+            AppointmentType::GeneralConsultation => 55,
+            AppointmentType::MentalHealth => 50,
+            AppointmentType::WomensHealth => 50,
             AppointmentType::TelehealthCheckIn => 40,
-            AppointmentType::PrescriptionRenewal => 30,
+            AppointmentType::Prescription => 30,
+            AppointmentType::MedicalCertificate => 25,
             AppointmentType::GroupSession => 20,
         }
     }
@@ -495,7 +535,7 @@ impl AppointmentType {
 
 impl Default for AppointmentType {
     fn default() -> Self {
-        AppointmentType::FollowUpConsultation
+        AppointmentType::GeneralConsultation
     }
 }
 

@@ -75,16 +75,26 @@ impl SupabaseClient {
         Ok(data)
     }
     
-    pub async fn get_user_profile(&self, _user_id: &str, auth_token: &str) -> Result<Value> {
-        // Use the Supabase Auth API to get user data
-        let path = "/auth/v1/user";
+    pub async fn get_user_profile(&self, user_id: &str, auth_token: &str) -> Result<Value> {
+        // Use the REST API to get user profile data from profiles table
+        let path = format!("/rest/v1/profiles?user_id=eq.{}", user_id);
         
-        self.request::<Value>(
+        let result: Vec<Value> = self.request(
             Method::GET,
-            path,
+            &path,
             Some(auth_token),
             None,
-        ).await
+        ).await?;
+        
+        if result.is_empty() {
+            // Return minimal profile if none exists
+            return Ok(json!({
+                "user_id": user_id,
+                "exists": false
+            }));
+        }
+        
+        Ok(result[0].clone())
     }
     
     pub async fn get_health_profile(&self, user_id: &str, auth_token: &str) -> Result<Value> {

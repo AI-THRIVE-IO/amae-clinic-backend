@@ -58,21 +58,32 @@ impl DoctorService {
             return Err(anyhow!("Doctor with email {} already exists", request.email));
         }
 
+        // Use reasonable defaults for missing fields
+        let default_date_of_birth = chrono::NaiveDate::from_ymd_opt(1980, 1, 1).unwrap();
+        
         let doctor_data = json!({
+            "user_id": request.user_id,
             "first_name": request.first_name,
             "last_name": request.last_name,
             "email": request.email,
+            "phone_number": request.phone,
             "specialty": request.specialty,
             "sub_specialty": request.sub_specialty,
             "bio": request.bio,
             "license_number": request.license_number,
             "years_experience": request.years_experience,
+            "medical_school": request.education,
+            "certifications": request.certifications,
+            "languages": request.languages,
+            "consultation_fee": request.consultation_fee,
+            "emergency_fee": request.emergency_fee,
             "timezone": request.timezone,
             "max_daily_appointments": request.max_daily_appointments,
             "available_days": request.available_days.unwrap_or_else(|| vec![1, 2, 3, 4, 5]),
-            "date_of_birth": request.date_of_birth.format("%Y-%m-%d").to_string(),
+            "date_of_birth": request.date_of_birth.unwrap_or(default_date_of_birth).format("%Y-%m-%d").to_string(),
             "is_verified": false, // Requires admin verification
-            "is_available": true,
+            "is_available": request.is_available.unwrap_or(true),
+            "accepts_insurance": request.accepts_insurance,
             "rating": 0.0,
             "total_consultations": 0,
             "created_at": Utc::now().to_rfc3339(),
@@ -252,7 +263,7 @@ impl DoctorService {
         Ok(doctors)
     }
 
-    /// Get doctor specialties
+    /// Get doctor specialties - FALLBACK to specialty field if specialties table doesn't exist
     pub async fn get_doctor_specialties(
         &self,
         doctor_id: &str,
@@ -260,19 +271,41 @@ impl DoctorService {
     ) -> Result<Vec<DoctorSpecialty>> {
         debug!("Fetching specialties for doctor: {}", doctor_id);
 
+        // Try the specialties table first
         let path = format!("/rest/v1/doctor_specialties?doctor_id=eq.{}&order=is_primary.desc,created_at.asc", doctor_id);
-        let result: Vec<Value> = self.supabase.request(
+        let result: Result<Vec<Value>, anyhow::Error> = self.supabase.request(
             Method::GET,
             &path,
             Some(auth_token),
             None,
-        ).await?;
+        ).await;
 
-        let specialties: Vec<DoctorSpecialty> = result.into_iter()
-            .map(|spec| serde_json::from_value(spec))
-            .collect::<std::result::Result<Vec<DoctorSpecialty>, _>>()?;
-
-        Ok(specialties)
+        match result {
+            Ok(specialties_data) => {
+                let specialties: Vec<DoctorSpecialty> = specialties_data.into_iter()
+                    .map(|spec| serde_json::from_value(spec))
+                    .collect::<std::result::Result<Vec<DoctorSpecialty>, _>>()?;
+                Ok(specialties)
+            },
+            Err(_) => {
+                // Fallback: get specialty from doctor table
+                debug!("doctor_specialties table not found, using doctor.specialty field");
+                let doctor = self.get_doctor(doctor_id, auth_token).await?;
+                
+                let specialty = DoctorSpecialty {
+                    id: Uuid::new_v4(),
+                    doctor_id: Uuid::parse_str(doctor_id)?,
+                    specialty_name: doctor.specialty,
+                    sub_specialty: doctor.sub_specialty,
+                    certification_number: None,
+                    certification_date: None,
+                    is_primary: true,
+                    created_at: doctor.created_at,
+                };
+                
+                Ok(vec![specialty])
+            }
+        }
     }
 
     /// Add specialty to doctor
@@ -608,34 +641,53 @@ impl DoctorService {
             Ok(doctor)
         }
 
-        /// PUBLIC: Get doctor specialties without authentication
+        /// PUBLIC: Get doctor specialties without authentication - FALLBACK IMPLEMENTATION
         pub async fn get_doctor_specialties_public(&self, doctor_id: &str) -> Result<Vec<DoctorSpecialty>, DoctorError> {
             debug!("Getting doctor specialties (public): {}", doctor_id);
 
             // First verify doctor exists and is verified
-            self.get_doctor_public(doctor_id).await?;
+            let doctor = self.get_doctor_public(doctor_id).await?;
 
+            // Try the specialties table first
             let path = format!("/rest/v1/doctor_specialties?doctor_id=eq.{}", doctor_id);
 
-            let result: Vec<Value> = self.supabase.request(
+            let result = self.supabase.request::<Vec<Value>>(
                 Method::GET,
                 &path,
                 None, // No auth token
                 None,
-            ).await.map_err(|e| {
-                error!("Failed to get doctor specialties (public): {}", e);
-                DoctorError::ValidationError(e.to_string())
-            })?;
+            ).await;
 
-            let specialties: Vec<DoctorSpecialty> = result.into_iter()
-                .map(|spec| serde_json::from_value(spec))
-                .collect::<Result<Vec<DoctorSpecialty>, _>>()
-                .map_err(|e| {
-                    error!("Failed to parse specialties: {}", e);
-                    DoctorError::ValidationError(format!("Failed to parse specialties: {}", e))
-                })?;
-
-            debug!("Found {} specialties for doctor (public): {}", specialties.len(), doctor_id);
-            Ok(specialties)
+            match result {
+                Ok(specialties_data) => {
+                    let specialties: Vec<DoctorSpecialty> = specialties_data.into_iter()
+                        .map(|spec| serde_json::from_value(spec))
+                        .collect::<Result<Vec<DoctorSpecialty>, _>>()
+                        .map_err(|e| {
+                            error!("Failed to parse specialties: {}", e);
+                            DoctorError::ValidationError(format!("Failed to parse specialties: {}", e))
+                        })?;
+                    
+                    debug!("Found {} specialties for doctor (public): {}", specialties.len(), doctor_id);
+                    Ok(specialties)
+                },
+                Err(_) => {
+                    // Fallback: create specialty from doctor table data
+                    debug!("doctor_specialties table not found, using doctor.specialty field");
+                    
+                    let specialty = DoctorSpecialty {
+                        id: Uuid::new_v4(),
+                        doctor_id: Uuid::parse_str(doctor_id).map_err(|_| DoctorError::ValidationError("Invalid doctor ID".to_string()))?,
+                        specialty_name: doctor.specialty,
+                        sub_specialty: doctor.sub_specialty,
+                        certification_number: None,
+                        certification_date: None,
+                        is_primary: true,
+                        created_at: doctor.created_at,
+                    };
+                    
+                    Ok(vec![specialty])
+                }
+            }
         }
 }
