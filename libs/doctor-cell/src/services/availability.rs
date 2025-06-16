@@ -685,7 +685,7 @@ pub fn new(config: &AppConfig) -> Self {
                 // FALLBACK: Generate default availability schedule
                 debug!("No availability data found, generating default schedule for doctor: {}", doctor_id);
                 
-                let start_date = query.date.and_hms_opt(9, 0, 0).unwrap();
+                let _start_date = query.date.and_hms_opt(9, 0, 0).unwrap();
                 let duration_minutes = query.duration_minutes.unwrap_or(30);
                 
                 // Check if this day is in the doctor's available days

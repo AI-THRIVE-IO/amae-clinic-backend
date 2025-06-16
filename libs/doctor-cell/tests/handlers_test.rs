@@ -77,7 +77,7 @@ fn create_complete_availability_response(id: &str, doctor_id: &str, day_of_week:
         "end_time": "17:00:00",
         "duration_minutes": 30,
         "timezone": "UTC",
-        "appointment_type": "FollowUpConsultation",
+        "appointment_type": "follow_up",
         "buffer_minutes": 0,
         "max_concurrent_appointments": 1,
         "is_recurring": true,
@@ -245,7 +245,7 @@ async fn setup_matching_service_mocks(mock_server: &MockServer, user_id: &str, s
                 "end_time": "17:00:00",
                 "duration_minutes": 30,
                 "is_available": true,
-                "appointment_type": "FollowUpConsultation",
+                "appointment_type": "follow_up",
                 "timezone": "UTC",
                 "created_at": "2024-01-01T00:00:00Z"
             }
@@ -283,7 +283,7 @@ async fn test_debug_actual_requests() {
             preferred_time_start: Some(NaiveTime::from_hms_opt(9, 0, 0).unwrap()),
             preferred_time_end: Some(NaiveTime::from_hms_opt(17, 0, 0).unwrap()),
             specialty_required: None,
-            appointment_type: "FollowUpConsultation".to_string(),
+            appointment_type: "follow_up".to_string(),
             duration_minutes: 30,
             timezone: "UTC".to_string(),
             max_results: Some(5),
@@ -368,18 +368,27 @@ async fn test_create_doctor_success() {
     let doctor_id = Uuid::new_v4().to_string();
     
     let request = CreateDoctorRequest {
+        user_id: None,
         first_name: "Dr. John".to_string(),
         last_name: "Smith".to_string(),
         email: "dr.smith@example.com".to_string(),
+        phone: Some("+1234567890".to_string()),
         specialty: "Cardiology".to_string(),
         sub_specialty: Some("Interventional Cardiology".to_string()),
         bio: Some("Experienced cardiologist".to_string()),
         license_number: "MD123456".to_string(),
         years_experience: Some(10),
+        education: Some("Harvard Medical School".to_string()),
+        certifications: Some(vec!["Board Certified Cardiologist".to_string()]),
+        languages: Some(vec!["English".to_string()]),
+        consultation_fee: Some(200.0),
+        emergency_fee: Some(400.0),
         timezone: Some("UTC".to_string()),
         max_daily_appointments: Some(8),
         available_days: Some(vec![1, 2, 3, 4, 5]),
-        date_of_birth: chrono::NaiveDate::from_ymd_opt(1980, 1, 1).unwrap(),
+        date_of_birth: Some(chrono::NaiveDate::from_ymd_opt(1980, 1, 1).unwrap()),
+        is_available: Some(true),
+        accepts_insurance: Some(true),
     };
 
     // Mock email check - return empty array (no existing doctor)
@@ -406,7 +415,7 @@ async fn test_create_doctor_success() {
             "timezone": request.timezone,
             "max_daily_appointments": request.max_daily_appointments,
             "available_days": request.available_days.clone().unwrap_or_else(|| vec![1, 2, 3, 4, 5]),
-            "date_of_birth": request.date_of_birth.format("%Y-%m-%d").to_string(),
+            "date_of_birth": request.date_of_birth.unwrap_or(chrono::NaiveDate::from_ymd_opt(1980, 1, 1).unwrap()).format("%Y-%m-%d").to_string(),
             "is_verified": false,
             "is_available": true,
             "rating": 0.0,
@@ -437,18 +446,27 @@ async fn test_create_doctor_unauthorized() {
     let token = JwtTestUtils::create_test_token(&patient_user, &config.supabase_jwt_secret, Some(24));
     
     let request = CreateDoctorRequest {
+        user_id: None,
         first_name: "Dr. John".to_string(),
         last_name: "Smith".to_string(),
         email: "dr.smith@example.com".to_string(),
+        phone: None,
         specialty: "Cardiology".to_string(),
         sub_specialty: None,
         bio: None,
         license_number: "TEMP123456".to_string(),
         years_experience: None,
+        education: None,
+        certifications: None,
+        languages: None,
+        consultation_fee: None,
+        emergency_fee: None,
         timezone: Some("UTC".to_string()),
         max_daily_appointments: None,
         available_days: None,
-        date_of_birth: chrono::NaiveDate::from_ymd_opt(1980, 1, 1).unwrap(),
+        date_of_birth: Some(chrono::NaiveDate::from_ymd_opt(1980, 1, 1).unwrap()),
+        is_available: None,
+        accepts_insurance: None,
     };
 
     let result = create_doctor(
@@ -685,9 +703,9 @@ async fn test_get_available_slots() {
         State(Arc::new(config)),
         axum::extract::Path(doctor_id.clone()),
         axum::extract::Query(AvailabilityQuery {
-            date: NaiveDate::from_ymd_opt(2024, 12, 25).unwrap().to_string(),
+            date: "2024-12-25".to_string(),
             timezone: Some("UTC".to_string()),
-            appointment_type: Some(AppointmentType::FollowUpConsultation),
+            appointment_type: Some(AppointmentType::FollowUp),
             duration_minutes: Some(30),
             patient_id: None,
             include_concurrent: Some(false),
@@ -719,7 +737,7 @@ async fn test_create_availability_as_doctor() {
         afternoon_end_time: Some(Utc::now().date_naive().and_time(NaiveTime::from_hms_opt(17, 0, 0).unwrap()).and_utc()),
         is_available: Some(true),
         // Enhanced medical scheduling fields
-        appointment_type: AppointmentType::FollowUpConsultation,
+        appointment_type: AppointmentType::FollowUp,
         buffer_minutes: Some(10),
         max_concurrent_appointments: Some(1),
         is_recurring: Some(true),
@@ -759,7 +777,7 @@ async fn test_create_availability_unauthorized() {
         afternoon_end_time: Some(Utc::now().date_naive().and_time(NaiveTime::from_hms_opt(17, 0, 0).unwrap()).and_utc()),
         is_available: Some(true),
         // Enhanced medical scheduling fields
-        appointment_type: AppointmentType::FollowUpConsultation,
+        appointment_type: AppointmentType::FollowUp,
         buffer_minutes: Some(10),
         max_concurrent_appointments: Some(1),
         is_recurring: Some(true),
@@ -802,7 +820,7 @@ async fn test_find_matching_doctors_no_specialty() {
             preferred_time_start: Some(NaiveTime::from_hms_opt(9, 0, 0).unwrap()),
             preferred_time_end: Some(NaiveTime::from_hms_opt(17, 0, 0).unwrap()),
             specialty_required: None,
-            appointment_type: "FollowUpConsultation".to_string(),
+            appointment_type: "follow_up".to_string(),
             duration_minutes: 30,
             timezone: "UTC".to_string(),
             max_results: Some(5),

@@ -237,7 +237,7 @@ impl MockSupabaseResponses {
             "afternoon_end_time": "2024-01-01T17:00:00Z",
             "is_available": true,
             // Enhanced medical scheduling fields
-            "appointment_type": "FollowUpConsultation",
+            "appointment_type": "follow_up",
             "buffer_minutes": 10,
             "max_concurrent_appointments": 1,
             "is_recurring": true,
