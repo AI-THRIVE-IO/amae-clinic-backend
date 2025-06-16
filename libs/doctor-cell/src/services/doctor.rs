@@ -213,7 +213,8 @@ impl DoctorService {
 
         // Add filters
         if let Some(specialty) = filters.specialty {
-            query_parts.push(format!("specialty=ilike.%{}%", specialty));
+            // Use eq. for enum columns (fixes 500 error)
+            query_parts.push(format!("specialty=eq.{}", specialty));
         }
         if let Some(min_exp) = filters.min_experience {
             query_parts.push(format!("years_experience=gte.{}", min_exp));
@@ -534,7 +535,8 @@ impl DoctorService {
 
             // Apply filters
             if let Some(specialty) = filters.specialty {
-                query_parts.push(format!("specialty=ilike.%{}%", specialty));
+                // Use eq. for enum columns (fixes 500 error)
+                query_parts.push(format!("specialty=eq.{}", specialty));
             }
             if let Some(min_rating) = filters.min_rating {
                 query_parts.push(format!("rating=gte.{}", min_rating));
