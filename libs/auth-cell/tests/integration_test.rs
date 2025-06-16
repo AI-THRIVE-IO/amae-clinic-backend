@@ -123,13 +123,14 @@ async fn test_get_profile_endpoint_success() {
     let app = create_test_app(config.clone()).await;
     let token = JwtTestUtils::create_test_token(&user, &config.supabase_jwt_secret, Some(24));
     
-    // Mock auth profile response (Supabase auth endpoint)
+    // Mock auth profile response (Supabase REST API endpoint)
     Mock::given(method("GET"))
-        .and(path("/auth/v1/user"))
+        .and(path("/rest/v1/profiles"))
+        .and(query_param("user_id", format!("eq.{}", user.id)))
         .and(header("Authorization", format!("Bearer {}", token)))
-        .respond_with(ResponseTemplate::new(200).set_body_json(
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
             MockSupabaseResponses::user_profile_response(&user.id)
-        ))
+        ])))
         .mount(&mock_server)
         .await;
     
@@ -153,9 +154,15 @@ async fn test_get_profile_endpoint_success() {
 
     let response = app.oneshot(request).await.unwrap();
     
-    assert_eq!(response.status(), StatusCode::OK);
-    
+    let status = response.status();
     let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    
+    if status != StatusCode::OK {
+        let body_str = String::from_utf8_lossy(&body);
+        println!("Error response ({}): {}", status, body_str);
+        panic!("Test failed with status: {}", status);
+    }
+    
     let json_response: serde_json::Value = serde_json::from_slice(&body).unwrap();
     
     assert_eq!(json_response["user_id"], user.id);
