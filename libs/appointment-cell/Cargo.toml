@@ -19,6 +19,7 @@ chrono = { workspace = true, features = ["serde"] }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
+futures = { workspace = true }
 
 # Internal dependencies
 shared-config = { workspace = true }

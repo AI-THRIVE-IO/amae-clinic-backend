@@ -20,7 +20,7 @@ async fn create_test_app(config: AppConfig) -> Router {
     doctor_routes(Arc::new(config))
 }
 
-// Copy the working mock setup from handlers_test.rs
+// Copied the working mock setup from handlers_test.rs
 async fn setup_get_available_slots_mocks(mock_server: &MockServer, doctor_id: &str, date: &str) {
     // Calculate weekday for the mock date (2024-01-01 is Monday = 0 in num_days_from_monday system)
     let weekday = 0; // Monday in num_days_from_monday system (used by public availability endpoint)

@@ -38,6 +38,7 @@ reqwest = { version = "0.12.15", features = ["json"] }
 base64 = "0.22.1"
 dotenv = "0.15.0"
 async-trait = "0.1.77"
+futures = "0.3.30"
 
 # Test dependencies
 tokio-test = "0.4.4"

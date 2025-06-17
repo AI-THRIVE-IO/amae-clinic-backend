@@ -80,6 +80,7 @@ dependencies = [
  "axum-extra",
  "chrono",
  "doctor-cell",
+ "futures",
  "headers",
  "reqwest",
  "serde",

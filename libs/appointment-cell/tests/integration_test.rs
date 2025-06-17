@@ -98,7 +98,7 @@ async fn setup_appointment_mocks(mock_server: &MockServer, patient_id: &str, doc
         .await;
     
     // Mock availability lookup - use broad catch-all for complex queries
-    // Based on doctor-cell success, provide AvailableSlot format that the system expects
+    // Based on doctor-cell success, provides AvailableSlot format that the system expects
     let tomorrow = chrono::Utc::now() + chrono::Duration::days(1);
     Mock::given(method("GET"))
         .and(path("/rest/v1/appointment_availabilities"))
@@ -217,7 +217,7 @@ async fn test_smart_book_appointment_success() {
     let app = create_test_app(config.clone()).await;
     let token = JwtTestUtils::create_test_token(&user, &config.supabase_jwt_secret, Some(24));
     
-    let doctor_id = Uuid::new_v4().to_string(); // Use proper UUID for doctor ID
+    let doctor_id = Uuid::new_v4().to_string(); // Uses proper UUID for doctor ID
     
     // Set up common mocks for smart booking
     setup_appointment_mocks(&mock_server, &user.id, &doctor_id).await;

@@ -648,12 +648,12 @@ async fn test_smart_booking_request() {
         Json(smart_request)
     ).await;
 
-    // PhD-LEVEL ACKNOWLEDGMENT: Smart booking requires complex multi-service integration mocking
+    // Smart booking requires complex multi-service integration mocking
     // Similar to integration test approach, check that it doesn't crash catastrophically
     // The complexity involves doctor matching service + availability service + conflict detection
     if let Err(ref e) = result {
         println!("Smart booking test error (expected for complex availability logic): {:?}", e);
-        // For now, accept that smart booking needs more sophisticated mocking infrastructure
+        // NOTE: Smart booking needs more sophisticated mocking infrastructure
         // This acknowledges the complexity while maintaining test suite integrity
         assert!(e.to_string().contains("Appointment slot not available"), 
                 "Expected availability error, got: {}", e);
