@@ -656,7 +656,16 @@ pub fn new(config: &AppConfig) -> Self {
         let doctor_service = DoctorService::new(&self.config);
         doctor_service.get_doctor_public(doctor_id).await?;
 
-        let day_of_week = query.date.weekday().num_days_from_monday() as i32;
+        let weekday = query.date.weekday();
+        let day_of_week = match weekday {
+            chrono::Weekday::Sun => 0,
+            chrono::Weekday::Mon => 1,
+            chrono::Weekday::Tue => 2,
+            chrono::Weekday::Wed => 3,
+            chrono::Weekday::Thu => 4,
+            chrono::Weekday::Fri => 5,
+            chrono::Weekday::Sat => 6,
+        };
         let query_parts = vec![
             format!("doctor_id=eq.{}", doctor_id),
             format!("day_of_week=eq.{}", day_of_week),

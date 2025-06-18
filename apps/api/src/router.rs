@@ -10,6 +10,9 @@ use health_profile_cell::router::health_profile_routes;
 use doctor_cell::router::doctor_routes;
 use appointment_cell::router::appointment_routes;
 use video_conferencing_cell::router::video_conferencing_routes;
+use security_cell::create_security_router;
+use monitoring_cell::create_monitoring_router;
+use performance_cell::create_performance_router;
 use shared_config::AppConfig;
 
 pub fn create_router(state: Arc<AppConfig>) -> Router {
@@ -20,5 +23,7 @@ pub fn create_router(state: Arc<AppConfig>) -> Router {
         .nest("/doctors", doctor_routes(state.clone()))
         .nest("/appointments", appointment_routes(state.clone()))
         .nest("/video", video_conferencing_routes(state.clone()))
-        // Other cells added later
+        .nest("/security", create_security_router(state.clone()))
+        .nest("/monitoring", create_monitoring_router(state.clone()))
+        .nest("/performance", create_performance_router(state.clone()))
 }

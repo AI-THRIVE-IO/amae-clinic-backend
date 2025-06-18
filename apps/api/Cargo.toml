@@ -20,5 +20,8 @@ health-profile-cell = { workspace = true }
 doctor-cell = { workspace = true }
 appointment-cell = { workspace = true }
 video-conferencing-cell = { workspace = true }
+security-cell = { workspace = true }
+monitoring-cell = { workspace = true }
+performance-cell = { workspace = true }
 shared-config = { workspace = true }
 shared-utils = { workspace = true }
