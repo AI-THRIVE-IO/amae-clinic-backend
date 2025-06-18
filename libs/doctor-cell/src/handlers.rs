@@ -67,6 +67,72 @@ pub struct MatchingQuery {
 // ==============================================================================
 
 #[axum::debug_handler]
+pub async fn diagnose_search_issues(
+    State(state): State<Arc<AppConfig>>,
+) -> Result<Json<Value>, AppError> {
+    let doctor_service = DoctorService::new(&state);
+    
+    // Test 1: Check total doctors count
+    let total_count_result = doctor_service.supabase().request::<Vec<Value>>(
+        reqwest::Method::GET,
+        "/rest/v1/doctors?select=count",
+        None,
+        None,
+    ).await;
+    
+    // Test 2: Check available doctors
+    let available_count_result = doctor_service.supabase().request::<Vec<Value>>(
+        reqwest::Method::GET,
+        "/rest/v1/doctors?is_available=eq.true&select=count",
+        None,
+        None,
+    ).await;
+    
+    // Test 3: Check verified doctors
+    let verified_count_result = doctor_service.supabase().request::<Vec<Value>>(
+        reqwest::Method::GET,
+        "/rest/v1/doctors?is_verified=eq.true&select=count",
+        None,
+        None,
+    ).await;
+    
+    // Test 4: Check available AND verified doctors
+    let available_verified_count_result = doctor_service.supabase().request::<Vec<Value>>(
+        reqwest::Method::GET,
+        "/rest/v1/doctors?is_available=eq.true&is_verified=eq.true&select=count",
+        None,
+        None,
+    ).await;
+    
+    // Test 5: Get sample doctor data (first 3 doctors)
+    let sample_doctors_result = doctor_service.supabase().request::<Vec<Value>>(
+        reqwest::Method::GET,
+        "/rest/v1/doctors?limit=3&select=id,first_name,last_name,specialty,is_available,is_verified",
+        None,
+        None,
+    ).await;
+    
+    Ok(Json(json!({
+        "diagnosis": {
+            "total_doctors": total_count_result.map(|r| r.len()).unwrap_or(0),
+            "available_doctors": available_count_result.map(|r| r.len()).unwrap_or(0),
+            "verified_doctors": verified_count_result.map(|r| r.len()).unwrap_or(0),
+            "available_and_verified_doctors": available_verified_count_result.map(|r| r.len()).unwrap_or(0),
+            "sample_doctors": sample_doctors_result.unwrap_or_else(|e| {
+                vec![json!({ "error": e.to_string() })]
+            }),
+            "recommendations": [
+                "If total_doctors is 0: No doctors in database - need to create doctor records",
+                "If available_doctors is 0: All doctors have is_available=false - check doctor availability status",
+                "If verified_doctors is 0: No doctors are verified - admin needs to verify doctors or use is_verified_only=false",
+                "If available_and_verified_doctors is 0: No doctors are both available AND verified",
+                "Check sample_doctors for actual data structure and field values"
+            ]
+        }
+    })))
+}
+
+#[axum::debug_handler]
 pub async fn search_doctors_public(
     State(state): State<Arc<AppConfig>>,
     Query(query): Query<DoctorSearchQuery>,
@@ -84,7 +150,7 @@ pub async fn search_doctors_public(
         available_time_end: None,
         timezone: None,
         appointment_type: None,
-        is_verified_only: Some(query.is_verified_only.unwrap_or(true)), // Default to verified only for public
+        is_verified_only: query.is_verified_only, // Let user choose, don't force verification
     };
     
     let doctors = doctor_service.search_doctors_public(filters, query.limit, query.offset).await

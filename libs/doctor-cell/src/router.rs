@@ -15,6 +15,7 @@ pub fn doctor_routes(state: Arc<AppConfig>) -> Router {
     // Public routes (no authentication required)
     let public_routes = Router::new()
         .route("/search", get(handlers::search_doctors_public))
+        .route("/diagnose", get(handlers::diagnose_search_issues))
         .route("/{doctor_id}", get(handlers::get_doctor_public))
         .route("/{doctor_id}/specialties", get(handlers::get_doctor_specialties_public))
         .route("/{doctor_id}/availability", get(handlers::get_doctor_availability_public))

@@ -1,6 +1,6 @@
 // libs/appointment-cell/src/services/booking.rs
 use anyhow::Result;
-use chrono::{DateTime, Utc, Duration, NaiveTime, Timelike};
+use chrono::{DateTime, Utc, Duration as ChronoDuration, NaiveTime, Timelike};
 use reqwest::Method;
 use serde_json::{json, Value};
 use tracing::{debug, info, warn};
@@ -176,7 +176,7 @@ impl AppointmentBookingService {
             duration_minutes
         };
         
-        let end_time = request.appointment_date + Duration::minutes(actual_duration as i64);
+        let end_time = request.appointment_date + ChronoDuration::minutes(actual_duration as i64);
         
         // Use enhanced conflict detection with appointment type awareness
         let conflict_check = self.conflict_service.check_conflicts_with_details(
@@ -254,7 +254,7 @@ impl AppointmentBookingService {
         // Handle rescheduling
         if let Some(new_start_time) = request.reschedule_to {
             let new_duration = request.reschedule_duration.unwrap_or(current_appointment.duration_minutes);
-            let new_end_time = new_start_time + Duration::minutes(new_duration as i64);
+            let new_end_time = new_start_time + ChronoDuration::minutes(new_duration as i64);
 
             // Validate reschedule timing
             self.validate_reschedule_timing(&current_appointment, new_start_time)?;
@@ -393,6 +393,7 @@ impl AppointmentBookingService {
             query_parts.push(format!("appointment_type=eq.{}", appointment_type));
         }
         if let Some(from_date) = query.from_date {
+            // Use RFC3339 format which is PostgreSQL-compatible
             query_parts.push(format!("scheduled_start_time=gte.{}", from_date.to_rfc3339()));
         }
         if let Some(to_date) = query.to_date {
@@ -424,23 +425,26 @@ impl AppointmentBookingService {
         Ok(appointments)
     }
 
-    /// Get upcoming appointments (next 24 hours)
+    /// Get upcoming appointments (configurable hours ahead)
     pub async fn get_upcoming_appointments(
         &self,
         patient_id: Option<Uuid>,
         doctor_id: Option<Uuid>,
+        hours_ahead: Option<i32>,
         auth_token: &str,
     ) -> Result<Vec<Appointment>, AppointmentError> {
         let now = Utc::now();
-        let tomorrow = now + Duration::hours(24);
+        // Round to nearest second to avoid nanosecond precision issues with PostgreSQL
+        let rounded_now = now.with_nanosecond(0).unwrap_or(now);
+        let future_time = rounded_now + ChronoDuration::hours(hours_ahead.unwrap_or(24) as i64);
 
         let query = AppointmentSearchQuery {
             patient_id,
             doctor_id,
             status: None,
             appointment_type: None,
-            from_date: Some(now),
-            to_date: Some(tomorrow),
+            from_date: Some(rounded_now),
+            to_date: Some(future_time),
             limit: Some(50),
             offset: None,
         };
@@ -861,7 +865,7 @@ impl AppointmentBookingService {
             patient_id: request.patient_id,
             preferred_date: Some(request.appointment_date.date_naive()),
             preferred_time_start: Some(request.appointment_date.time()),
-            preferred_time_end: Some((request.appointment_date + Duration::hours(2)).time()),
+            preferred_time_end: Some((request.appointment_date + ChronoDuration::hours(2)).time()),
             specialty_required: request.specialty_required.clone(),
             appointment_type: request.appointment_type.to_string(),
             duration_minutes: request.duration_minutes,
@@ -964,8 +968,8 @@ impl AppointmentBookingService {
 
         // Validate preferred date if provided
         if let Some(preferred_date) = request.preferred_date {
-            let min_advance = Duration::hours(self.validation_rules.min_advance_booking_hours as i64);
-            let max_advance = Duration::days(self.validation_rules.max_advance_booking_days as i64);
+            let min_advance = ChronoDuration::hours(self.validation_rules.min_advance_booking_hours as i64);
+            let max_advance = ChronoDuration::days(self.validation_rules.max_advance_booking_days as i64);
             
             let preferred_datetime = preferred_date.and_time(
                 request.preferred_time_start.unwrap_or(NaiveTime::from_hms_opt(9, 0, 0).unwrap())
@@ -993,7 +997,7 @@ impl AppointmentBookingService {
         let now = Utc::now();
 
         // Check minimum advance booking time
-        let min_advance = Duration::hours(self.validation_rules.min_advance_booking_hours as i64);
+        let min_advance = ChronoDuration::hours(self.validation_rules.min_advance_booking_hours as i64);
         if request.appointment_date <= now + min_advance {
             return Err(AppointmentError::InvalidTime(
                 format!("Appointment must be booked at least {} hours in advance", 
@@ -1002,7 +1006,7 @@ impl AppointmentBookingService {
         }
 
         // Check maximum advance booking time
-        let max_advance = Duration::days(self.validation_rules.max_advance_booking_days as i64);
+        let max_advance = ChronoDuration::days(self.validation_rules.max_advance_booking_days as i64);
         if request.appointment_date >= now + max_advance {
             return Err(AppointmentError::InvalidTime(
                 format!("Appointment cannot be booked more than {} days in advance", 
@@ -1061,7 +1065,7 @@ impl AppointmentBookingService {
         buffer_minutes: i32,
         auth_token: &str,
     ) -> Result<Appointment, AppointmentError> {
-        let end_time = request.appointment_date + Duration::minutes(request.duration_minutes as i64);
+        let end_time = request.appointment_date + ChronoDuration::minutes(request.duration_minutes as i64);
         let now = Utc::now();
 
         // Generate video conference link for telemedicine appointments
@@ -1153,7 +1157,7 @@ impl AppointmentBookingService {
         // Handle rescheduling
         if let Some(new_start_time) = request.reschedule_to {
             let duration = request.reschedule_duration.unwrap_or(current_appointment.duration_minutes);
-            let new_end_time = new_start_time + Duration::minutes(duration as i64);
+            let new_end_time = new_start_time + ChronoDuration::minutes(duration as i64);
             
             update_data.insert("scheduled_start_time".to_string(), json!(new_start_time.to_rfc3339()));
             update_data.insert("scheduled_end_time".to_string(), json!(new_end_time.to_rfc3339()));
@@ -1190,9 +1194,9 @@ impl AppointmentBookingService {
 
     fn validate_reschedule_timing(&self, appointment: &Appointment, new_time: DateTime<Utc>) -> Result<(), AppointmentError> {
         let now = Utc::now();
-        let min_reschedule_notice = Duration::hours(self.validation_rules.allowed_reschedule_hours as i64);
+        let min_reschedule_notice = ChronoDuration::hours(self.validation_rules.allowed_reschedule_hours as i64);
 
-        if appointment.scheduled_start_time <= now + min_reschedule_notice {
+        if appointment.scheduled_start_time() <= now + min_reschedule_notice {
             return Err(AppointmentError::InvalidTime(
                 format!("Appointment can only be rescheduled at least {} hours in advance", 
                        self.validation_rules.allowed_reschedule_hours)
@@ -1209,7 +1213,7 @@ impl AppointmentBookingService {
 
     fn validate_cancellation_timing(&self, appointment: &Appointment) -> Result<(), AppointmentError> {
         let now = Utc::now();
-        let min_cancellation_notice = Duration::hours(self.validation_rules.allowed_cancellation_hours as i64);
+        let min_cancellation_notice = ChronoDuration::hours(self.validation_rules.allowed_cancellation_hours as i64);
 
         // Check if appointment can be cancelled
         match appointment.status {
@@ -1223,7 +1227,7 @@ impl AppointmentBookingService {
         }
 
         // Check timing for cancellation
-        if appointment.scheduled_start_time <= now + min_cancellation_notice {
+        if appointment.scheduled_start_time() <= now + min_cancellation_notice {
             return Err(AppointmentError::InvalidTime(
                 format!("Appointment can only be cancelled at least {} hours in advance", 
                        self.validation_rules.allowed_cancellation_hours)
@@ -1266,6 +1270,14 @@ impl AppointmentBookingService {
     /// Get appointment timing parameters based on type
     fn get_appointment_timing(&self, appointment_type: &AppointmentType) -> (i32, i32) {
         match appointment_type {
+            AppointmentType::InitialConsultation => (30, 10),
+            AppointmentType::FollowUpConsultation => (20, 10),
+            AppointmentType::EmergencyConsultation => (30, 5),
+            AppointmentType::PrescriptionRenewal => (15, 5),
+            AppointmentType::SpecialtyConsultation => (45, 15),
+            AppointmentType::GroupSession => (60, 10),
+            AppointmentType::TelehealthCheckIn => (15, 5),
+            // Legacy support
             AppointmentType::GeneralConsultation => (30, 10),
             AppointmentType::FollowUp => (20, 10),
             AppointmentType::Prescription => (15, 5),
@@ -1280,6 +1292,11 @@ impl AppointmentBookingService {
     fn supports_concurrent_appointments(&self, appointment_type: &AppointmentType) -> bool {
         matches!(
             appointment_type,
+            AppointmentType::InitialConsultation |
+            AppointmentType::FollowUpConsultation |
+            AppointmentType::SpecialtyConsultation |
+            AppointmentType::GroupSession |
+            // Legacy support
             AppointmentType::GeneralConsultation |
             AppointmentType::FollowUp |
             AppointmentType::MentalHealth
@@ -1290,6 +1307,14 @@ impl AppointmentBookingService {
     /// Get appointment priority score for scheduling optimization
     fn get_appointment_priority(&self, appointment_type: &AppointmentType, has_patient_history: bool) -> i32 {
         let base_priority = match appointment_type {
+            AppointmentType::EmergencyConsultation => 100,
+            AppointmentType::SpecialtyConsultation => 80,
+            AppointmentType::InitialConsultation => 60,
+            AppointmentType::FollowUpConsultation => 50,
+            AppointmentType::TelehealthCheckIn => 40,
+            AppointmentType::PrescriptionRenewal => 20,
+            AppointmentType::GroupSession => 30,
+            // Legacy support
             AppointmentType::Urgent => 100,
             AppointmentType::MentalHealth => 80,
             AppointmentType::WomensHealth => 70,

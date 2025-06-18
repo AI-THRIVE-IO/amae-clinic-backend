@@ -94,8 +94,8 @@ impl ConflictDetectionService {
         // Enhanced conflict detection with concurrent appointment support
         for appointment in existing_appointments {
             if self.is_active_appointment(&appointment.status) {
-                let appointment_buffered_start = appointment.scheduled_start_time - Duration::minutes(buffer_minutes as i64);
-                let appointment_buffered_end = appointment.scheduled_end_time + Duration::minutes(buffer_minutes as i64);
+                let appointment_buffered_start = appointment.scheduled_start_time() - Duration::minutes(buffer_minutes as i64);
+                let appointment_buffered_end = appointment.scheduled_end_time() + Duration::minutes(buffer_minutes as i64);
                 
                 if self.appointments_overlap(
                     buffered_start,
@@ -110,8 +110,8 @@ impl ConflictDetectionService {
                     let exact_overlap = self.appointments_overlap(
                         start_time,
                         end_time,
-                        appointment.scheduled_start_time,
-                        appointment.scheduled_end_time
+                        appointment.scheduled_start_time(),
+                        appointment.scheduled_end_time()
                     );
                     
                     if exact_overlap {

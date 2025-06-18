@@ -18,8 +18,6 @@ pub struct Appointment {
     pub appointment_type: AppointmentType,
     pub duration_minutes: i32,
     pub timezone: String,
-    pub scheduled_start_time: DateTime<Utc>,
-    pub scheduled_end_time: DateTime<Utc>,
     pub actual_start_time: Option<DateTime<Utc>>,
     pub actual_end_time: Option<DateTime<Utc>>,
     pub notes: Option<String>,
@@ -31,6 +29,18 @@ pub struct Appointment {
     pub video_conference_link: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+impl Appointment {
+    /// Calculate the scheduled end time based on appointment_date and duration
+    pub fn scheduled_end_time(&self) -> DateTime<Utc> {
+        self.appointment_date + chrono::Duration::minutes(self.duration_minutes as i64)
+    }
+    
+    /// Get the scheduled start time (alias for appointment_date for backward compatibility)
+    pub fn scheduled_start_time(&self) -> DateTime<Utc> {
+        self.appointment_date
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -60,27 +70,50 @@ impl fmt::Display for AppointmentStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "PascalCase")]
 pub enum AppointmentType {
+    InitialConsultation,
+    FollowUpConsultation,
+    EmergencyConsultation,
+    PrescriptionRenewal,
+    SpecialtyConsultation,
+    GroupSession,
+    TelehealthCheckIn,
+    // Legacy variants for backward compatibility
+    #[serde(alias = "general_consultation")]
     GeneralConsultation,
+    #[serde(alias = "follow_up")]
     FollowUp,
+    #[serde(alias = "prescription")]
     Prescription,
+    #[serde(alias = "medical_certificate")]
     MedicalCertificate,
+    #[serde(alias = "urgent")]
     Urgent,
+    #[serde(alias = "mental_health")]
     MentalHealth,
+    #[serde(alias = "womens_health")]
     WomensHealth,
 }
 
 impl fmt::Display for AppointmentType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            AppointmentType::GeneralConsultation => write!(f, "general_consultation"),
-            AppointmentType::FollowUp => write!(f, "follow_up"),
-            AppointmentType::Prescription => write!(f, "prescription"),
-            AppointmentType::MedicalCertificate => write!(f, "medical_certificate"),
-            AppointmentType::Urgent => write!(f, "urgent"),
-            AppointmentType::MentalHealth => write!(f, "mental_health"),
-            AppointmentType::WomensHealth => write!(f, "womens_health"),
+            AppointmentType::InitialConsultation => write!(f, "InitialConsultation"),
+            AppointmentType::FollowUpConsultation => write!(f, "FollowUpConsultation"),
+            AppointmentType::EmergencyConsultation => write!(f, "EmergencyConsultation"),
+            AppointmentType::PrescriptionRenewal => write!(f, "PrescriptionRenewal"),
+            AppointmentType::SpecialtyConsultation => write!(f, "SpecialtyConsultation"),
+            AppointmentType::GroupSession => write!(f, "GroupSession"),
+            AppointmentType::TelehealthCheckIn => write!(f, "TelehealthCheckIn"),
+            // Legacy support
+            AppointmentType::GeneralConsultation => write!(f, "FollowUpConsultation"),
+            AppointmentType::FollowUp => write!(f, "FollowUpConsultation"),
+            AppointmentType::Prescription => write!(f, "PrescriptionRenewal"),
+            AppointmentType::MedicalCertificate => write!(f, "SpecialtyConsultation"),
+            AppointmentType::Urgent => write!(f, "EmergencyConsultation"),
+            AppointmentType::MentalHealth => write!(f, "SpecialtyConsultation"),
+            AppointmentType::WomensHealth => write!(f, "SpecialtyConsultation"),
         }
     }
 }

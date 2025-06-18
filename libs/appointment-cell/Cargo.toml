@@ -20,6 +20,7 @@ anyhow = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
 futures = { workspace = true }
+urlencoding = "2.1"
 
 # Internal dependencies
 shared-config = { workspace = true }

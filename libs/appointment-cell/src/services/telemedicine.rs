@@ -323,7 +323,7 @@ impl TelemedicineService {
     ) -> Vec<String> {
         let mut instructions = vec![
             format!("Your telemedicine appointment is scheduled for {}", 
-                   appointment.scheduled_start_time.format("%Y-%m-%d at %H:%M UTC")),
+                   appointment.scheduled_start_time().format("%Y-%m-%d at %H:%M UTC")),
             "Please join the video call 5 minutes before your scheduled time".to_string(),
         ];
 
@@ -394,8 +394,8 @@ impl TelemedicineService {
         let early_start_buffer = Duration::minutes(10); // Can start 10 minutes early
         let late_start_limit = Duration::minutes(15);   // Can start up to 15 minutes late
 
-        let earliest_start = appointment.scheduled_start_time - early_start_buffer;
-        let latest_start = appointment.scheduled_start_time + late_start_limit;
+        let earliest_start = appointment.scheduled_start_time() - early_start_buffer;
+        let latest_start = appointment.scheduled_start_time() + late_start_limit;
 
         current_time >= earliest_start && current_time <= latest_start
     }

@@ -213,8 +213,8 @@ impl DoctorService {
 
         // Add filters
         if let Some(specialty) = filters.specialty {
-            // Use eq. for enum columns (fixes 500 error)
-            query_parts.push(format!("specialty=eq.{}", specialty));
+            // Use ilike for flexible case-insensitive matching
+            query_parts.push(format!("specialty=ilike.%{}%", specialty));
         }
         if let Some(min_exp) = filters.min_experience {
             query_parts.push(format!("years_experience=gte.{}", min_exp));
@@ -237,6 +237,8 @@ impl DoctorService {
         if let Some(offset_val) = offset {
             path.push_str(&format!("&offset={}", offset_val));
         }
+        
+        debug!("Authenticated search query path: {}", path);
 
         let result: Vec<Value> = self.supabase.request(
             Method::GET,
@@ -530,13 +532,17 @@ impl DoctorService {
 
             let mut query_parts = vec![
                 "is_available=eq.true".to_string(),
-                "is_verified=eq.true".to_string(), // Only show verified doctors in public search
             ];
+
+            // Only filter by verification if explicitly requested
+            if filters.is_verified_only.unwrap_or(false) {
+                query_parts.push("is_verified=eq.true".to_string());
+            }
 
             // Apply filters
             if let Some(specialty) = filters.specialty {
-                // Use eq. for enum columns (fixes 500 error)
-                query_parts.push(format!("specialty=eq.{}", specialty));
+                // Use ilike for flexible case-insensitive matching
+                query_parts.push(format!("specialty=ilike.%{}%", specialty));
             }
             if let Some(min_rating) = filters.min_rating {
                 query_parts.push(format!("rating=gte.{}", min_rating));
@@ -554,6 +560,8 @@ impl DoctorService {
             if let Some(offset_val) = offset {
                 path.push_str(&format!("&offset={}", offset_val));
             }
+            
+            debug!("Public search query path: {}", path);
 
             // Use anon key for public access
             let result: Vec<Value> = self.supabase.request(

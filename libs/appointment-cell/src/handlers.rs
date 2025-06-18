@@ -421,7 +421,7 @@ pub async fn get_upcoming_appointments(
         }
     };
     
-    let appointments = booking_service.get_upcoming_appointments(patient_id, doctor_id, token).await
+    let appointments = booking_service.get_upcoming_appointments(patient_id, doctor_id, params.hours_ahead, token).await
         .map_err(|e| AppError::Internal(e.to_string()))?;
     
     Ok(Json(json!({
