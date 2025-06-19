@@ -724,6 +724,10 @@ async fn test_create_availability_as_doctor() {
         max_concurrent_appointments: Some(1),
         is_recurring: Some(true),
         specific_date: None,
+        // Additional fields for curl compatibility
+        timezone: Some("UTC".to_string()),
+        appointment_types: Some(vec!["FollowUpConsultation".to_string()]),
+        is_active: Some(true),
     };
 
     // FIXED: Setup correct mocks using appointment_availabilities table
@@ -764,6 +768,10 @@ async fn test_create_availability_unauthorized() {
         max_concurrent_appointments: Some(1),
         is_recurring: Some(true),
         specific_date: None,
+        // Additional fields for curl compatibility
+        timezone: Some("UTC".to_string()),
+        appointment_types: Some(vec!["FollowUpConsultation".to_string()]),
+        is_active: Some(true),
     };
 
     let result = create_availability(
