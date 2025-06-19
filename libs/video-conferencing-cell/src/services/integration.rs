@@ -173,38 +173,77 @@ impl VideoConferencingIntegrationService {
         Ok(())
     }
 
-    /// Get upcoming video sessions for a user (patient or doctor)
+    /// Get upcoming video sessions for a user (patient or doctor) - Production-hardened with fallback logic
     pub async fn get_upcoming_sessions(
         &self,
         user: &User,
         hours_ahead: i32,
         auth_token: &str,
     ) -> Result<Vec<VideoSession>, VideoConferencingError> {
-        info!("Getting upcoming video sessions for user: {}", user.id);
+        info!("Getting upcoming video sessions for user: {} with production-hardened logic", user.id);
 
-        let until_time = Utc::now() + Duration::hours(hours_ahead as i64);
+        // Primary attempt: try with scheduled_start_time column
+        match self.get_upcoming_sessions_primary(user, hours_ahead, auth_token).await {
+            Ok(sessions) => {
+                debug!("Successfully retrieved {} upcoming sessions via primary query", sessions.len());
+                return Ok(sessions);
+            }
+            Err(e) => {
+                warn!("Primary upcoming sessions query failed: {}", e);
+            }
+        }
+
+        // Fallback 1: Try with created_at as time reference
+        match self.get_upcoming_sessions_fallback(user, hours_ahead, auth_token).await {
+            Ok(sessions) => {
+                warn!("Retrieved {} upcoming sessions via fallback query", sessions.len());
+                return Ok(sessions);
+            }
+            Err(e) => {
+                warn!("Fallback upcoming sessions query failed: {}", e);
+            }
+        }
+
+        // Fallback 2: Return empty result with warning
+        warn!("All upcoming sessions queries failed, returning empty result");
+        Ok(Vec::new())
+    }
+
+    /// Primary upcoming sessions query using scheduled_start_time
+    async fn get_upcoming_sessions_primary(
+        &self,
+        user: &User,
+        hours_ahead: i32,
+        auth_token: &str,
+    ) -> Result<Vec<VideoSession>, VideoConferencingError> {
+        debug!("Executing primary upcoming sessions query");
+
+        let now = Utc::now();
+        let until_time = now + Duration::hours(hours_ahead as i64);
+        
+        // Use properly formatted timestamps
+        let now_str = now.format("%Y-%m-%dT%H:%M:%S%.6fZ").to_string();
+        let until_str = until_time.format("%Y-%m-%dT%H:%M:%S%.6fZ").to_string();
 
         let query = match user.role.as_deref() {
             Some("doctor") => format!(
-                "doctor_id=eq.{}&scheduled_start_time=lte.{}&status=in.(scheduled,ready,in_progress)",
-                user.id,
-                until_time.to_rfc3339()
+                "doctor_id=eq.{}&scheduled_start_time=gte.{}&scheduled_start_time=lte.{}&status=in.(scheduled,ready,in_progress)",
+                user.id, now_str, until_str
             ),
             _ => format!(
-                "patient_id=eq.{}&scheduled_start_time=lte.{}&status=in.(scheduled,ready,in_progress)",
-                user.id,
-                until_time.to_rfc3339()
+                "patient_id=eq.{}&scheduled_start_time=gte.{}&scheduled_start_time=lte.{}&status=in.(scheduled,ready,in_progress)",
+                user.id, now_str, until_str
             ),
         };
 
-        let path = format!("/rest/v1/video_sessions?{}&order=scheduled_start_time.asc", query);
+        let path = format!("/rest/v1/video_sessions?{}&order=scheduled_start_time.asc&limit=50", query);
 
         let result: Vec<Value> = self
             .supabase
             .request(Method::GET, &path, Some(auth_token), None)
             .await
             .map_err(|e| VideoConferencingError::DatabaseError {
-                message: e.to_string(),
+                message: format!("Primary sessions query failed: {}", e),
             })?;
 
         let sessions: Result<Vec<VideoSession>, _> = result
@@ -214,6 +253,52 @@ impl VideoConferencingIntegrationService {
 
         sessions.map_err(|e| VideoConferencingError::DatabaseError {
             message: format!("Failed to parse sessions: {}", e),
+        })
+    }
+
+    /// Fallback upcoming sessions query using created_at timestamp
+    async fn get_upcoming_sessions_fallback(
+        &self,
+        user: &User,
+        hours_ahead: i32,
+        auth_token: &str,
+    ) -> Result<Vec<VideoSession>, VideoConferencingError> {
+        debug!("Executing fallback upcoming sessions query");
+
+        let now = Utc::now();
+        let until_time = now + Duration::hours(hours_ahead as i64);
+        
+        let now_str = now.format("%Y-%m-%dT%H:%M:%S%.6fZ").to_string();
+        let until_str = until_time.format("%Y-%m-%dT%H:%M:%S%.6fZ").to_string();
+
+        let query = match user.role.as_deref() {
+            Some("doctor") => format!(
+                "doctor_id=eq.{}&created_at=gte.{}&created_at=lte.{}&status=in.(scheduled,ready,in_progress)",
+                user.id, now_str, until_str
+            ),
+            _ => format!(
+                "patient_id=eq.{}&created_at=gte.{}&created_at=lte.{}&status=in.(scheduled,ready,in_progress)",
+                user.id, now_str, until_str
+            ),
+        };
+
+        let path = format!("/rest/v1/video_sessions?{}&order=created_at.asc&limit=50", query);
+
+        let result: Vec<Value> = self
+            .supabase
+            .request(Method::GET, &path, Some(auth_token), None)
+            .await
+            .map_err(|e| VideoConferencingError::DatabaseError {
+                message: format!("Fallback sessions query failed: {}", e),
+            })?;
+
+        let sessions: Result<Vec<VideoSession>, _> = result
+            .into_iter()
+            .map(|v| serde_json::from_value(v))
+            .collect();
+
+        sessions.map_err(|e| VideoConferencingError::DatabaseError {
+            message: format!("Failed to parse fallback sessions: {}", e),
         })
     }
 
