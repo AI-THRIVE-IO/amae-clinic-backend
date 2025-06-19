@@ -205,14 +205,17 @@ impl DoctorAvailability {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DoctorSpecialty {
-    pub id: Uuid,
-    pub doctor_id: Uuid,
+    pub id: String,
+    pub doctor_id: String,
     pub specialty_name: String,
     pub sub_specialty: Option<String>,
     pub certification_number: Option<String>,
     pub certification_date: Option<NaiveDate>,
+    pub certification_body: Option<String>,
     pub is_primary: bool,
+    pub is_active: bool,
     pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -341,6 +344,7 @@ pub struct CreateSpecialtyRequest {
     pub sub_specialty: Option<String>,
     pub certification_number: Option<String>,
     pub certification_date: Option<NaiveDate>,
+    pub certification_body: Option<String>,
     pub is_primary: Option<bool>,
 }
 

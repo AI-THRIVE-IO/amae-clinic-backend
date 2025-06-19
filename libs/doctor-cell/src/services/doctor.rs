@@ -262,7 +262,8 @@ impl DoctorService {
     ) -> Result<Vec<DoctorSpecialty>> {
         debug!("Fetching specialties for doctor: {}", doctor_id);
 
-        let path = format!("/rest/v1/doctor_specialties?doctor_id=eq.{}&order=is_primary.desc,created_at.asc", doctor_id);
+        // Get doctor data which includes specialty fields
+        let path = format!("/rest/v1/doctors?id=eq.{}&select=*", doctor_id);
         let result: Vec<Value> = self.supabase.request(
             Method::GET,
             &path,
@@ -270,9 +271,29 @@ impl DoctorService {
             None,
         ).await?;
 
-        let specialties: Vec<DoctorSpecialty> = result.into_iter()
-            .map(|spec| serde_json::from_value(spec))
-            .collect::<std::result::Result<Vec<DoctorSpecialty>, _>>()?;
+        if result.is_empty() {
+            return Err(anyhow!("Doctor not found"));
+        }
+
+        let doctor: Doctor = serde_json::from_value(result[0].clone())?;
+
+        // Convert doctor's specialty/sub_specialty to DoctorSpecialty format
+        let mut specialties = Vec::new();
+        
+        // Add primary specialty
+        specialties.push(DoctorSpecialty {
+            id: uuid::Uuid::new_v4().to_string(),
+            doctor_id: doctor_id.to_string(),
+            specialty_name: doctor.specialty.clone(),
+            sub_specialty: doctor.sub_specialty.clone(),
+            certification_number: None,
+            certification_date: None,
+            certification_body: None,
+            is_primary: true,
+            is_active: true,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        });
 
         Ok(specialties)
     }
@@ -286,48 +307,52 @@ impl DoctorService {
     ) -> Result<DoctorSpecialty> {
         debug!("Adding specialty to doctor: {}", doctor_id);
 
-        // If this is marked as primary, unmark other primary specialties
-        if request.is_primary.unwrap_or(false) {
-            let update_path = format!("/rest/v1/doctor_specialties?doctor_id=eq.{}", doctor_id);
-            let update_data = json!({
-                "is_primary": false,
+        // Update the doctor's specialty or sub_specialty field
+        let update_data = if request.is_primary.unwrap_or(false) {
+            json!({
+                "specialty": request.specialty_name,
+                "sub_specialty": request.sub_specialty,
                 "updated_at": Utc::now().to_rfc3339()
-            });
+            })
+        } else {
+            json!({
+                "sub_specialty": request.specialty_name,
+                "updated_at": Utc::now().to_rfc3339()
+            })
+        };
 
-            let _: Vec<Value> = self.supabase.request(
-                Method::PATCH,
-                &update_path,
-                Some(auth_token),
-                Some(update_data),
-            ).await?;
-        }
-
-        let specialty_data = json!({
-            "doctor_id": doctor_id,
-            "specialty_name": request.specialty_name,
-            "sub_specialty": request.sub_specialty,
-            "certification_number": request.certification_number,
-            "certification_date": request.certification_date,
-            "is_primary": request.is_primary.unwrap_or(false),
-            "created_at": Utc::now().to_rfc3339()
-        });
-
+        let path = format!("/rest/v1/doctors?id=eq.{}", doctor_id);
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert("Prefer", reqwest::header::HeaderValue::from_static("return=representation"));
 
         let result: Vec<Value> = self.supabase.request_with_headers(
-            Method::POST,
-            "/rest/v1/doctor_specialties",
+            Method::PATCH,
+            &path,
             Some(auth_token),
-            Some(specialty_data),
+            Some(update_data),
             Some(headers),
         ).await?;
 
         if result.is_empty() {
-            return Err(anyhow!("Failed to add specialty"));
+            return Err(anyhow!("Failed to update doctor specialty"));
         }
 
-        let specialty: DoctorSpecialty = serde_json::from_value(result[0].clone())?;
+        let _doctor: Doctor = serde_json::from_value(result[0].clone())?;
+
+        // Return the specialty in the expected format
+        let specialty = DoctorSpecialty {
+            id: uuid::Uuid::new_v4().to_string(),
+            doctor_id: doctor_id.to_string(),
+            specialty_name: request.specialty_name,
+            sub_specialty: request.sub_specialty,
+            certification_number: request.certification_number,
+            certification_date: request.certification_date,
+            certification_body: request.certification_body,
+            is_primary: request.is_primary.unwrap_or(false),
+            is_active: true,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
         Ok(specialty)
     }
 
@@ -620,28 +645,26 @@ impl DoctorService {
         pub async fn get_doctor_specialties_public(&self, doctor_id: &str) -> Result<Vec<DoctorSpecialty>, DoctorError> {
             debug!("Getting doctor specialties (public): {}", doctor_id);
 
-            // First verify doctor exists and is verified
-            self.get_doctor_public(doctor_id).await?;
+            // Get doctor data which includes specialty fields
+            let doctor = self.get_doctor_public(doctor_id).await?;
 
-            let path = format!("/rest/v1/doctor_specialties?doctor_id=eq.{}", doctor_id);
-
-            let result: Vec<Value> = self.supabase.request(
-                Method::GET,
-                &path,
-                None, // No auth token
-                None,
-            ).await.map_err(|e| {
-                error!("Failed to get doctor specialties (public): {}", e);
-                DoctorError::ValidationError(e.to_string())
-            })?;
-
-            let specialties: Vec<DoctorSpecialty> = result.into_iter()
-                .map(|spec| serde_json::from_value(spec))
-                .collect::<Result<Vec<DoctorSpecialty>, _>>()
-                .map_err(|e| {
-                    error!("Failed to parse specialties: {}", e);
-                    DoctorError::ValidationError(format!("Failed to parse specialties: {}", e))
-                })?;
+            // Convert doctor's specialty/sub_specialty to DoctorSpecialty format
+            let mut specialties = Vec::new();
+            
+            // Add primary specialty
+            specialties.push(DoctorSpecialty {
+                id: uuid::Uuid::new_v4().to_string(),
+                doctor_id: doctor_id.to_string(),
+                specialty_name: doctor.specialty.clone(),
+                sub_specialty: doctor.sub_specialty.clone(),
+                certification_number: None,
+                certification_date: None,
+                certification_body: None,
+                is_primary: true,
+                is_active: true,
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+            });
 
             debug!("Found {} specialties for doctor (public): {}", specialties.len(), doctor_id);
             Ok(specialties)
