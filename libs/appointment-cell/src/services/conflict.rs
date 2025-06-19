@@ -318,10 +318,15 @@ impl ConflictDetectionService {
         auth_token: &str,
     ) -> Result<Vec<Appointment>, AppointmentError> {
         
+        let start_str = start_time.to_rfc3339();
+        let end_str = end_time.to_rfc3339();
+        let encoded_start = urlencoding::encode(&start_str);
+        let encoded_end = urlencoding::encode(&end_str);
+        
         let mut query_parts = vec![
             format!("doctor_id=eq.{}", doctor_id),
-            format!("scheduled_start_time=lte.{}", end_time.to_rfc3339()),
-            format!("scheduled_end_time=gte.{}", start_time.to_rfc3339()),
+            format!("scheduled_start_time=lte.{}", encoded_end),
+            format!("scheduled_end_time=gte.{}", encoded_start),
         ];
 
         if let Some(exclude_id) = exclude_appointment_id {
@@ -353,10 +358,15 @@ impl ConflictDetectionService {
         end_time: DateTime<Utc>,
         auth_token: &str,
     ) -> Result<Vec<Appointment>, AppointmentError> {
+        let start_str = start_time.to_rfc3339();
+        let end_str = end_time.to_rfc3339();
+        let encoded_start = urlencoding::encode(&start_str);
+        let encoded_end = urlencoding::encode(&end_str);
+        
         let query_parts = vec![
             format!("patient_id=eq.{}", patient_id),
-            format!("scheduled_start_time=gte.{}", start_time.to_rfc3339()),
-            format!("scheduled_start_time=lte.{}", end_time.to_rfc3339()),
+            format!("scheduled_start_time=gte.{}", encoded_start),
+            format!("scheduled_start_time=lte.{}", encoded_end),
         ];
 
         let path = format!("/rest/v1/appointments?{}&order=scheduled_start_time.asc", 

@@ -393,11 +393,15 @@ impl AppointmentBookingService {
             query_parts.push(format!("appointment_type=eq.{}", appointment_type));
         }
         if let Some(from_date) = query.from_date {
-            // Use RFC3339 format which is PostgreSQL-compatible
-            query_parts.push(format!("scheduled_start_time=gte.{}", from_date.to_rfc3339()));
+            // Use URL-encoded RFC3339 format for Supabase
+            let date_str = from_date.to_rfc3339();
+            let encoded_date = urlencoding::encode(&date_str);
+            query_parts.push(format!("scheduled_start_time=gte.{}", encoded_date));
         }
         if let Some(to_date) = query.to_date {
-            query_parts.push(format!("scheduled_start_time=lte.{}", to_date.to_rfc3339()));
+            let date_str = to_date.to_rfc3339();
+            let encoded_date = urlencoding::encode(&date_str);
+            query_parts.push(format!("scheduled_start_time=lte.{}", encoded_date));
         }
 
         let mut path = format!("/rest/v1/appointments?{}&order=scheduled_start_time.desc", 
