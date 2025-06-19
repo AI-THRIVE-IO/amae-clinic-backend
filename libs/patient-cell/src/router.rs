@@ -8,8 +8,8 @@ use crate::handlers::*;
 pub fn create_patient_router(config: Arc<AppConfig>) -> Router {
     Router::new()
         .route("/", post(create_patient))
-        .route("/:id", get(get_patient))
-        .route("/:id", put(update_patient))
+        .route("/{id}", get(get_patient))
+        .route("/{id}", put(update_patient))
         .route("/search", get(search_patients))
         .layer(middleware::from_fn_with_state(config.clone(), auth_middleware))
         .with_state(config)
