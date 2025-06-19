@@ -21,6 +21,9 @@ pub fn video_conferencing_routes(state: Arc<AppConfig>) -> Router {
 
     // Protected routes (authentication required)
     let protected_routes = Router::new()
+        // User session management (specific routes before parameterized ones)
+        .route("/sessions/upcoming", get(get_upcoming_sessions))
+        
         // Video session management
         .route("/sessions", post(create_video_session))
         .route("/sessions/{session_id}", get(get_video_session))
@@ -33,9 +36,6 @@ pub fn video_conferencing_routes(state: Arc<AppConfig>) -> Router {
         .route("/appointments/{appointment_id}/session", post(create_session_for_appointment))
         .route("/appointments/{appointment_id}/availability", get(check_video_availability))
         .route("/appointments/{appointment_id}/stats", get(get_appointment_video_stats))
-        
-        // User session management
-        .route("/upcoming", get(get_upcoming_sessions))
         
         // Admin endpoints
         .route("/admin/cleanup", post(cleanup_expired_sessions))
