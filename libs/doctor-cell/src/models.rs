@@ -1,6 +1,95 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Deserializer, de};
 use uuid::Uuid;
 use chrono::{DateTime, Utc, NaiveTime, NaiveDate, Datelike, Timelike};
+
+/// Production-grade deserializer for day_of_week that accepts both string day names and integers
+/// Supports: "monday"/"Monday"/1, "tuesday"/"Tuesday"/2, etc., or direct integers 0-6
+fn deserialize_day_of_week<'de, D>(deserializer: D) -> Result<i32, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct DayOfWeekVisitor;
+
+    impl<'de> de::Visitor<'de> for DayOfWeekVisitor {
+        type Value = i32;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a day of week as integer (0-6) or string (monday-sunday)")
+        }
+
+        fn visit_i32<E>(self, value: i32) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            if (0..=6).contains(&value) {
+                Ok(value)
+            } else {
+                Err(E::custom(format!("day_of_week must be between 0-6, got {}", value)))
+            }
+        }
+
+        fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            if (0..=6).contains(&value) {
+                Ok(value as i32)
+            } else {
+                Err(E::custom(format!("day_of_week must be between 0-6, got {}", value)))
+            }
+        }
+
+        fn visit_u32<E>(self, value: u32) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            if value <= 6 {
+                Ok(value as i32)
+            } else {
+                Err(E::custom(format!("day_of_week must be between 0-6, got {}", value)))
+            }
+        }
+
+        fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            if value <= 6 {
+                Ok(value as i32)
+            } else {
+                Err(E::custom(format!("day_of_week must be between 0-6, got {}", value)))
+            }
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            match value.to_lowercase().as_str() {
+                "sunday" | "sun" => Ok(0),
+                "monday" | "mon" => Ok(1),
+                "tuesday" | "tue" | "tues" => Ok(2),
+                "wednesday" | "wed" => Ok(3),
+                "thursday" | "thu" | "thur" | "thurs" => Ok(4),
+                "friday" | "fri" => Ok(5),
+                "saturday" | "sat" => Ok(6),
+                _ => Err(E::custom(format!(
+                    "unknown day name '{}', expected sunday-saturday or 0-6",
+                    value
+                ))),
+            }
+        }
+
+        fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            self.visit_str(&value)
+        }
+    }
+
+    deserializer.deserialize_any(DayOfWeekVisitor)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Doctor {
@@ -222,6 +311,7 @@ pub struct DoctorSpecialty {
 pub struct DoctorAvailability {
     pub id: Uuid,
     pub doctor_id: Uuid,
+    #[serde(deserialize_with = "deserialize_day_of_week")]
     pub day_of_week: i32, // 0 = Sunday, 1 = Monday, etc.
     pub duration_minutes: i32,
     pub is_available: bool,
@@ -309,6 +399,7 @@ pub struct UpdateDoctorRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateAvailabilityRequest {
+    #[serde(deserialize_with = "deserialize_day_of_week")]
     pub day_of_week: i32,
     pub duration_minutes: i32,
     pub morning_start_time: Option<DateTime<Utc>>,
@@ -443,16 +534,37 @@ impl std::fmt::Display for DoctorError {
 
 impl std::error::Error for DoctorError {}
 
-// Enhanced Medical Appointment Types
+// Enhanced Medical Appointment Types with Comprehensive Alias Support
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "PascalCase")]
 pub enum AppointmentType {
-    InitialConsultation,    // 45-60 minutes, new patients, higher priority
-    FollowUpConsultation,   // 15-30 minutes, existing patients
-    EmergencyConsultation,  // 15-45 minutes, urgent care, highest priority
-    PrescriptionRenewal,    // 10-15 minutes, medication management
-    SpecialtyConsultation,  // 30-60 minutes, specialist referrals
-    GroupSession,           // 60-90 minutes, multiple patients
-    TelehealthCheckIn,      // 10-15 minutes, remote monitoring
+    // 45-60 minutes, new patients, higher priority
+    #[serde(alias = "initial_consultation", alias = "initial", alias = "new_patient")]
+    InitialConsultation,
+    
+    // 15-30 minutes, existing patients
+    #[serde(alias = "follow_up_consultation", alias = "follow_up", alias = "followup", alias = "general_consultation", alias = "consultation", alias = "general")]
+    FollowUpConsultation,
+    
+    // 15-45 minutes, urgent care, highest priority
+    #[serde(alias = "emergency_consultation", alias = "emergency", alias = "urgent")]
+    EmergencyConsultation,
+    
+    // 10-15 minutes, medication management
+    #[serde(alias = "prescription_renewal", alias = "prescription", alias = "medication_renewal")]
+    PrescriptionRenewal,
+    
+    // 30-60 minutes, specialist referrals
+    #[serde(alias = "specialty_consultation", alias = "specialty", alias = "specialist")]
+    SpecialtyConsultation,
+    
+    // 60-90 minutes, multiple patients
+    #[serde(alias = "group_session", alias = "group", alias = "workshop")]
+    GroupSession,
+    
+    // 10-15 minutes, remote monitoring
+    #[serde(alias = "telehealth_checkin", alias = "telehealth", alias = "remote_checkin", alias = "virtual")]
+    TelehealthCheckIn,
 }
 
 impl AppointmentType {

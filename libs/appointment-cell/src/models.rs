@@ -72,27 +72,48 @@ impl fmt::Display for AppointmentStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "PascalCase")]
 pub enum AppointmentType {
+    // Primary enum variants (PascalCase for API standards)
+    #[serde(alias = "initial_consultation", alias = "initial", alias = "new_patient")]
     InitialConsultation,
+    
+    #[serde(alias = "follow_up_consultation", alias = "followup")]
     FollowUpConsultation,
+    
+    #[serde(alias = "emergency_consultation", alias = "emergency")]
     EmergencyConsultation,
+    
+    #[serde(alias = "prescription_renewal", alias = "medication_renewal")]
     PrescriptionRenewal,
+    
+    #[serde(alias = "specialty_consultation", alias = "specialist")]
     SpecialtyConsultation,
+    
+    #[serde(alias = "group_session", alias = "workshop")]
     GroupSession,
+    
+    #[serde(alias = "telehealth_checkin", alias = "telehealth", alias = "remote_checkin", alias = "virtual")]
     TelehealthCheckIn,
-    // Legacy variants for backward compatibility
-    #[serde(alias = "general_consultation")]
+    
+    // Legacy variants maintained for complete backward compatibility with internal code
+    #[serde(alias = "general_consultation", alias = "consultation", alias = "general")]
     GeneralConsultation,
+    
     #[serde(alias = "follow_up")]
     FollowUp,
+    
     #[serde(alias = "prescription")]
     Prescription,
-    #[serde(alias = "medical_certificate")]
-    MedicalCertificate,
+    
     #[serde(alias = "urgent")]
     Urgent,
-    #[serde(alias = "mental_health")]
+    
+    #[serde(alias = "medical_certificate")]
+    MedicalCertificate,
+    
+    #[serde(alias = "mental_health", alias = "psychology", alias = "psychiatry")]
     MentalHealth,
-    #[serde(alias = "womens_health")]
+    
+    #[serde(alias = "womens_health", alias = "gynecology", alias = "obstetrics")]
     WomensHealth,
 }
 
@@ -106,14 +127,13 @@ impl fmt::Display for AppointmentType {
             AppointmentType::SpecialtyConsultation => write!(f, "SpecialtyConsultation"),
             AppointmentType::GroupSession => write!(f, "GroupSession"),
             AppointmentType::TelehealthCheckIn => write!(f, "TelehealthCheckIn"),
-            // Legacy support
-            AppointmentType::GeneralConsultation => write!(f, "FollowUpConsultation"),
-            AppointmentType::FollowUp => write!(f, "FollowUpConsultation"),
-            AppointmentType::Prescription => write!(f, "PrescriptionRenewal"),
-            AppointmentType::MedicalCertificate => write!(f, "SpecialtyConsultation"),
-            AppointmentType::Urgent => write!(f, "EmergencyConsultation"),
-            AppointmentType::MentalHealth => write!(f, "SpecialtyConsultation"),
-            AppointmentType::WomensHealth => write!(f, "SpecialtyConsultation"),
+            AppointmentType::GeneralConsultation => write!(f, "GeneralConsultation"),
+            AppointmentType::FollowUp => write!(f, "FollowUp"),
+            AppointmentType::Prescription => write!(f, "Prescription"),
+            AppointmentType::Urgent => write!(f, "Urgent"),
+            AppointmentType::MedicalCertificate => write!(f, "MedicalCertificate"),
+            AppointmentType::MentalHealth => write!(f, "MentalHealth"),
+            AppointmentType::WomensHealth => write!(f, "WomensHealth"),
         }
     }
 }
