@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use axum::{middleware, routing::{get, post, put}, Router};
 use shared_config::AppConfig;
-use shared_utils::middleware::auth_middleware;
+use shared_utils::extractor::auth_middleware;
 
 use crate::handlers::*;
 
@@ -11,5 +11,6 @@ pub fn create_patient_router(config: Arc<AppConfig>) -> Router {
         .route("/:id", get(get_patient))
         .route("/:id", put(update_patient))
         .route("/search", get(search_patients))
-        .layer(middleware::from_fn_with_state(config, auth_middleware))
+        .layer(middleware::from_fn_with_state(config.clone(), auth_middleware))
+        .with_state(config)
 }

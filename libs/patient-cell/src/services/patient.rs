@@ -201,9 +201,9 @@ impl PatientService {
 
         let limit = query.limit.unwrap_or(50);
         let offset = query.offset.unwrap_or(0);
-        let path = format!("/rest/v1/patients{}limit={}&offset={}", 
-            if query_string.is_empty() { "?" } else { &format!("{}&", query_string) },
-            limit, offset);
+        let separator = if query_string.is_empty() { "?" } else { "&" };
+        let path = format!("/rest/v1/patients{}{}limit={}&offset={}", 
+            query_string, separator, limit, offset);
 
         let result: Vec<Value> = self.supabase.request(
             Method::GET,

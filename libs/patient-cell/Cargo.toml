@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0"
-axum = "0.8"
+axum = { version = "0.8", features = ["macros"] }
 axum-extra = "0.10"
 chrono = { version = "0.4", features = ["serde"] }
 headers = "0.4"

@@ -11,6 +11,7 @@ members = [
     "libs/doctor-cell",
     "libs/appointment-cell",
     "libs/video-conferencing-cell",
+    "libs/patient-cell",
     "libs/security-cell",
     "libs/monitoring-cell",
     "libs/performance-cell",
@@ -65,6 +66,7 @@ health-profile-cell = { path = "libs/health-profile-cell" }
 doctor-cell = { path = "libs/doctor-cell" }
 appointment-cell = { path = "libs/appointment-cell" }
 video-conferencing-cell = { path = "libs/video-conferencing-cell" }
+patient-cell = { path = "libs/patient-cell" }
 security-cell = { path = "libs/security-cell" }
 monitoring-cell = { path = "libs/monitoring-cell" }
 performance-cell = { path = "libs/performance-cell" }
