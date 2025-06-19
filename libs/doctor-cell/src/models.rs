@@ -401,17 +401,25 @@ pub struct UpdateDoctorRequest {
 pub struct CreateAvailabilityRequest {
     #[serde(deserialize_with = "deserialize_day_of_week")]
     pub day_of_week: i32,
+    #[serde(alias = "slot_duration_minutes")]
     pub duration_minutes: i32,
+    #[serde(alias = "start_time")]
     pub morning_start_time: Option<DateTime<Utc>>,
+    #[serde(alias = "end_time")]
     pub morning_end_time: Option<DateTime<Utc>>,
     pub afternoon_start_time: Option<DateTime<Utc>>,
     pub afternoon_end_time: Option<DateTime<Utc>>,
     pub is_available: Option<bool>,
     pub appointment_type: AppointmentType,
     pub buffer_minutes: Option<i32>,
+    #[serde(alias = "max_concurrent_patients")]
     pub max_concurrent_appointments: Option<i32>,
     pub is_recurring: Option<bool>,
     pub specific_date: Option<NaiveDate>,
+    // Additional fields for curl compatibility
+    pub timezone: Option<String>,
+    pub appointment_types: Option<Vec<String>>,
+    pub is_active: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -504,6 +512,7 @@ impl DoctorAvailabilityResponse {
 // Request/Response DTOs for profile image upload
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DoctorImageUpload {
+    #[serde(alias = "image_data")]
     pub file_data: String, // Base64 encoded image
 }
 
