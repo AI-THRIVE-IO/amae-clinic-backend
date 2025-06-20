@@ -687,13 +687,21 @@ pub fn new(config: &AppConfig) -> Self {
             DoctorError::ValidationError(e.to_string())
         })?;
 
-        let availability_slots: Vec<AvailableSlot> = result.into_iter()
-            .map(|slot| serde_json::from_value(slot))
-            .collect::<Result<Vec<AvailableSlot>, _>>()
+        // First, deserialize into DoctorAvailability structs
+        let doctor_availabilities: Vec<DoctorAvailability> = result.into_iter()
+            .map(|avail| serde_json::from_value(avail))
+            .collect::<Result<Vec<DoctorAvailability>, _>>()
             .map_err(|e| {
-                error!("Failed to parse availability: {}", e);
-                DoctorError::ValidationError(format!("Failed to parse availability: {}", e))
+                error!("Failed to parse doctor availability: {}", e);
+                DoctorError::ValidationError(format!("Failed to parse doctor availability: {}", e))
             })?;
+
+        // Convert DoctorAvailability to AvailableSlot objects
+        let mut availability_slots = Vec::new();
+        for availability in doctor_availabilities {
+            let slots = availability.generate_medical_slots(query.date, &[]);
+            availability_slots.extend(slots);
+        }
 
         debug!("Found {} availability slots (public) for doctor: {}", availability_slots.len(), doctor_id);
         Ok(availability_slots)
