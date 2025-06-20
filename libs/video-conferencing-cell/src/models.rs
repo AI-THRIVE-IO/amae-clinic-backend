@@ -168,9 +168,31 @@ pub struct CloudflareRenegotiateRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateVideoSessionRequest {
+    #[serde(with = "uuid_serde_flexible")]
     pub appointment_id: Uuid,
     pub session_type: VideoSessionType,
     pub scheduled_start_time: DateTime<Utc>,
+}
+
+// Flexible UUID deserializer that handles both string UUIDs and validates them properly
+mod uuid_serde_flexible {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use uuid::Uuid;
+    
+    pub fn serialize<S>(uuid: &Uuid, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        uuid.serialize(serializer)
+    }
+    
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Uuid, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Uuid::parse_str(&s).map_err(|e| serde::de::Error::custom(format!("Invalid UUID format '{}': {}", s, e)))
+    }
 }
 
 #[derive(Debug, Serialize)]

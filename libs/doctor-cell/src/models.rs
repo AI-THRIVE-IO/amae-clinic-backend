@@ -91,6 +91,35 @@ where
     deserializer.deserialize_any(DayOfWeekVisitor)
 }
 
+/// Flexible deserializer for time fields that accepts time strings like "09:00:00" and converts to DateTime<Utc>
+fn deserialize_optional_time_from_string<'de, D>(deserializer: D) -> Result<Option<DateTime<Utc>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    use chrono::{NaiveTime, Utc, TimeZone};
+    use serde::de::Error;
+    
+    let opt = Option::<String>::deserialize(deserializer)?;
+    match opt {
+        Some(time_str) => {
+            // Parse time string like "09:00:00" or "9:00"
+            let naive_time = NaiveTime::parse_from_str(&time_str, "%H:%M:%S")
+                .or_else(|_| NaiveTime::parse_from_str(&time_str, "%H:%M"))
+                .or_else(|_| NaiveTime::parse_from_str(&time_str, "%I:%M %p"))
+                .map_err(|e| D::Error::custom(format!("Invalid time format '{}': {}", time_str, e)))?;
+            
+            // Convert to today's UTC DateTime for consistency
+            let today = Utc::now().date_naive();
+            let datetime_utc = Utc.from_local_datetime(&today.and_time(naive_time))
+                .single()
+                .ok_or_else(|| D::Error::custom("Invalid datetime conversion"))?;
+            
+            Ok(Some(datetime_utc))
+        }
+        None => Ok(None),
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Doctor {
     pub id: Uuid,
@@ -116,10 +145,12 @@ pub struct Doctor {
 }
 
 impl Doctor {
-    pub fn full_name(&self) -> String {
-        format!("{} {}", self.first_name, self.last_name)
+    /// Get the full name by combining first_name and last_name
+    pub fn get_full_name(&self) -> String {
+        format!("{} {}", self.first_name, self.last_name).trim().to_string()
     }
 }
+
 
 impl DoctorAvailability {
     pub fn has_morning_availability(&self) -> bool {
@@ -375,11 +406,22 @@ pub struct CreateDoctorRequest {
     pub sub_specialty: Option<String>,
     pub bio: Option<String>,
     pub license_number: String,
+    #[serde(alias = "years_of_experience")]
     pub years_experience: Option<i32>,
     pub timezone: Option<String>,
     pub max_daily_appointments: Option<i32>,
     pub available_days: Option<Vec<i32>>,
     pub date_of_birth: NaiveDate,
+    // Additional curl compatibility fields
+    pub user_id: Option<String>,
+    pub phone: Option<String>,
+    pub education: Option<String>,    
+    pub certifications: Option<Vec<String>>,
+    pub languages: Option<Vec<String>>,
+    pub consultation_fee: Option<f64>,
+    pub emergency_fee: Option<f64>,
+    pub is_available: Option<bool>,
+    pub accepts_insurance: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -403,24 +445,36 @@ pub struct CreateAvailabilityRequest {
     pub day_of_week: i32,
     #[serde(alias = "slot_duration_minutes")]
     pub duration_minutes: i32,
-    #[serde(alias = "start_time")]
+    #[serde(alias = "start_time", deserialize_with = "deserialize_optional_time_from_string")]
     pub morning_start_time: Option<DateTime<Utc>>,
-    #[serde(alias = "end_time")]
+    #[serde(alias = "end_time", deserialize_with = "deserialize_optional_time_from_string")]
     pub morning_end_time: Option<DateTime<Utc>>,
+    #[serde(deserialize_with = "deserialize_optional_time_from_string")]
     pub afternoon_start_time: Option<DateTime<Utc>>,
+    #[serde(deserialize_with = "deserialize_optional_time_from_string")]
     pub afternoon_end_time: Option<DateTime<Utc>>,
+    #[serde(default = "default_true")]
     pub is_available: Option<bool>,
+    #[serde(default)]
     pub appointment_type: AppointmentType,
+    #[serde(default = "default_buffer_minutes")]
     pub buffer_minutes: Option<i32>,
-    #[serde(alias = "max_concurrent_patients")]
+    #[serde(alias = "max_concurrent_patients", default = "default_max_concurrent")]
     pub max_concurrent_appointments: Option<i32>,
+    #[serde(default = "default_true")]
     pub is_recurring: Option<bool>,
     pub specific_date: Option<NaiveDate>,
     // Additional fields for curl compatibility
     pub timezone: Option<String>,
     pub appointment_types: Option<Vec<String>>,
+    #[serde(alias = "is_available")]
     pub is_active: Option<bool>,
 }
+
+// Helper functions for defaults
+fn default_true() -> Option<bool> { Some(true) }
+fn default_buffer_minutes() -> Option<i32> { Some(10) }
+fn default_max_concurrent() -> Option<i32> { Some(1) }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateAvailabilityRequest {
