@@ -74,7 +74,7 @@ pub async fn update_health_profile(
         None,
         None,
     ).await.map_err(|_| AppError::NotFound("Patient not found".to_string()))?;
-    let gender = patient_result[0]["gender"].as_str().unwrap_or("").to_lowercase();
+    let gender = patient_result[0]["birth_gender"].as_str().unwrap_or("").to_lowercase();
 
     if gender != "female" && (
         update_data.is_pregnant.unwrap_or(false) ||
@@ -143,8 +143,10 @@ pub async fn create_health_profile(
             "first_name": "Unknown",
             "last_name": "Patient",
             "email": user.email.unwrap_or_else(|| "unknown@example.com".to_string()),
-            "gender": inferred_gender,
+            "birth_gender": inferred_gender,
             "date_of_birth": "1990-01-01",
+            "phone_number": "+0000000000",
+            "address": "Unknown Address",
             "created_at": chrono::Utc::now(),
             "updated_at": chrono::Utc::now()
         });
@@ -159,7 +161,7 @@ pub async fn create_health_profile(
         
         inferred_gender.to_lowercase()
     } else {
-        patient_result[0]["gender"].as_str().unwrap_or("unknown").to_lowercase()
+        patient_result[0]["birth_gender"].as_str().unwrap_or("unknown").to_lowercase()
     };
 
     if gender != "female" && (
