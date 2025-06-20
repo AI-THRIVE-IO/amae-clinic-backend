@@ -1,0 +1,28 @@
+[package]
+name = "booking-queue-cell"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+axum = { workspace = true }
+axum-extra = { workspace = true }
+headers = { workspace = true }
+redis = { workspace = true }
+deadpool-redis = { workspace = true }
+futures = { workspace = true }
+thiserror = { workspace = true }
+
+# Shared dependencies
+shared-config = { workspace = true }
+shared-database = { workspace = true }
+shared-models = { workspace = true }
+
+# Cell dependencies for integration
+doctor-cell = { workspace = true }

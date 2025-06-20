@@ -10,6 +10,7 @@ members = [
     "libs/shared/utils",
     "libs/doctor-cell",
     "libs/appointment-cell",
+    "libs/booking-queue-cell",
     "libs/video-conferencing-cell",
     "libs/patient-cell",
     "libs/security-cell",
@@ -47,6 +48,8 @@ regex = "1.10.2"
 argon2 = "0.5.3"
 ring = "0.17.8"
 rand = "0.8.5"
+redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
+deadpool-redis = "0.14"
 
 # Test dependencies
 tokio-test = "0.4.4"
@@ -65,6 +68,7 @@ shared-utils = { path = "libs/shared/utils" }
 health-profile-cell = { path = "libs/health-profile-cell" }
 doctor-cell = { path = "libs/doctor-cell" }
 appointment-cell = { path = "libs/appointment-cell" }
+booking-queue-cell = { path = "libs/booking-queue-cell" }
 video-conferencing-cell = { path = "libs/video-conferencing-cell" }
 patient-cell = { path = "libs/patient-cell" }
 security-cell = { path = "libs/security-cell" }

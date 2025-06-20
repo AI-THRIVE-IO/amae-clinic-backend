@@ -17,12 +17,20 @@ pub fn appointment_routes(state: Arc<AppConfig>) -> Router {
     let protected_routes = Router::new()
         // ENHANCED: Core appointment management with smart booking
         .route("/smart-book", post(handlers::smart_book_appointment)) // NEW: Smart booking with history prioritization
+        .route("/smart-book/async", post(handlers::smart_book_appointment_async)) // NEW: Async smart booking
+        .route("/smart-book/sync", post(handlers::smart_book_appointment_sync)) // NEW: Sync smart booking fallback
         .route("/", post(handlers::book_appointment))
         .route("/search", get(handlers::search_appointments))
         .route("/{appointment_id}", get(handlers::get_appointment))
         .route("/{appointment_id}", put(handlers::update_appointment))
         .route("/{appointment_id}/reschedule", patch(handlers::reschedule_appointment))
         .route("/{appointment_id}/cancel", post(handlers::cancel_appointment))
+        
+        // Async booking management
+        .route("/booking-status/{job_id}", get(handlers::get_booking_status))
+        .route("/booking-cancel/{job_id}", post(handlers::cancel_booking))
+        .route("/booking-retry/{job_id}", post(handlers::retry_booking))
+        .route("/queue/stats", get(handlers::get_queue_stats)) // Admin only
         
         // Appointment listings
         .route("/upcoming", get(handlers::get_upcoming_appointments))

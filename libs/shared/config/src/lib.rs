@@ -9,6 +9,7 @@ pub struct AppConfig {
     pub cloudflare_realtime_app_id: String,
     pub cloudflare_realtime_api_token: String,
     pub cloudflare_realtime_base_url: String,
+    pub redis_url: Option<String>,
 }
 
 impl AppConfig {
@@ -44,6 +45,7 @@ impl AppConfig {
                     warn!("CLOUDFLARE_REALTIME_BASE_URL not set, using default");
                     "https://rtc.live.cloudflare.com/v1".to_string()
                 }),
+            redis_url: env::var("REDIS_URL").ok(),
         };
         
         if !config.is_configured() {

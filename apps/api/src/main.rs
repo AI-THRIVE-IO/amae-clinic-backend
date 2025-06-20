@@ -38,6 +38,12 @@ async fn main() {
     // Create shared state
     let state = Arc::new(config);
     
+    // Start booking queue consumer service
+    let consumer_result = start_booking_consumer(Arc::clone(&state)).await;
+    if let Err(e) = &consumer_result {
+        tracing::warn!("Failed to start booking queue consumer: {}. Async booking will be unavailable.", e);
+    }
+    
     // Build the application router
     let app = router::create_router(state)
         .layer(
@@ -54,7 +60,50 @@ async fn main() {
     info!("Listening on {}", addr);
 
     let listener = TcpListener::bind(addr).await.unwrap();
-    axum::serve(listener, app)
-        .await
-        .unwrap();
+    
+    // Graceful shutdown handling
+    let server = axum::serve(listener, app);
+    
+    tokio::select! {
+        result = server => {
+            if let Err(e) = result {
+                tracing::error!("Server error: {}", e);
+            }
+        }
+        _ = tokio::signal::ctrl_c() => {
+            info!("Received shutdown signal, shutting down gracefully...");
+        }
+    }
+    
+    info!("Amae Clinic API server shutdown complete");
+}
+
+async fn start_booking_consumer(config: Arc<AppConfig>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use booking_queue_cell::{BookingConsumerService, WorkerConfig};
+    
+    // Check if Redis URL is configured
+    if config.redis_url.is_none() {
+        return Err("Redis URL not configured, async booking disabled".into());
+    }
+    
+    let worker_config = WorkerConfig {
+        worker_id: "main-api-worker".to_string(),
+        max_concurrent_jobs: 3,
+        job_timeout_seconds: 120,
+        retry_delay_seconds: 30,
+        health_check_interval_seconds: 60,
+        graceful_shutdown_timeout_seconds: 30,
+    };
+    
+    let consumer = BookingConsumerService::new(worker_config, config).await?;
+    
+    // Start consumer in background
+    tokio::spawn(async move {
+        if let Err(e) = consumer.start().await {
+            tracing::error!("Booking consumer service failed: {}", e);
+        }
+    });
+    
+    info!("Booking queue consumer service started successfully");
+    Ok(())
 }

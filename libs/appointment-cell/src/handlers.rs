@@ -64,9 +64,48 @@ pub struct StatsQuery {
 // ENHANCED APPOINTMENT BOOKING HANDLERS
 // ==============================================================================
 
-/// NEW: Smart appointment booking with automatic doctor selection and history prioritization
+/// NEW: Async Smart appointment booking with automatic doctor selection and history prioritization
 #[axum::debug_handler]
-pub async fn smart_book_appointment(
+pub async fn smart_book_appointment_async(
+    State(state): State<Arc<AppConfig>>,
+    TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
+    Extension(user): Extension<User>,
+    Json(request): Json<SmartBookingRequest>,
+) -> Result<Json<Value>, AppError> {
+    let token = auth.token();
+    
+    // Verify authorization - only patient can book their own appointment or admin can book
+    let is_patient = request.patient_id.to_string() == user.id;
+    let is_admin = user.role.as_deref() == Some("admin");
+    
+    if !is_patient && !is_admin {
+        return Err(AppError::Auth("Not authorized to book appointment for this patient".to_string()));
+    }
+    
+    // Try to use booking queue if available, fallback to direct booking
+    match try_async_booking(&state, request.clone(), token).await {
+        Ok(booking_response) => {
+            Ok(Json(json!({
+                "success": true,
+                "async_booking": true,
+                "job_id": booking_response.job_id,
+                "status": booking_response.status,
+                "estimated_completion": booking_response.estimated_completion_time,
+                "websocket_channel": booking_response.websocket_channel,
+                "tracking_url": booking_response.tracking_url,
+                "message": "Smart booking request queued for processing. You will receive real-time updates via WebSocket."
+            })))
+        }
+        Err(_) => {
+            // Fallback to synchronous booking
+            smart_book_appointment_sync(State(state), TypedHeader(auth), Extension(user), Json(request)).await
+        }
+    }
+}
+
+/// Fallback synchronous smart booking
+#[axum::debug_handler]
+pub async fn smart_book_appointment_sync(
     State(state): State<Arc<AppConfig>>,
     TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
     Extension(user): Extension<User>,
@@ -106,6 +145,7 @@ pub async fn smart_book_appointment(
     
     Ok(Json(json!({
         "success": true,
+        "async_booking": false,
         "smart_booking": smart_booking_response,
         "message": if smart_booking_response.is_preferred_doctor {
             "Appointment booked with your preferred doctor based on consultation history"
@@ -113,6 +153,16 @@ pub async fn smart_book_appointment(
             "Appointment booked with best available doctor"
         }
     })))
+}
+
+/// Legacy endpoint name for compatibility
+pub async fn smart_book_appointment(
+    state: State<Arc<AppConfig>>,
+    auth: TypedHeader<Authorization<Bearer>>,
+    user: Extension<User>,
+    request: Json<SmartBookingRequest>,
+) -> Result<Json<Value>, AppError> {
+    smart_book_appointment_async(state, auth, user, request).await
 }
 
 /// Enhanced appointment booking with specialty validation
@@ -586,4 +636,221 @@ pub async fn get_appointment_stats(
         "stats": stats,
         "note": "Statistics include doctor continuity rate showing percentage of appointments with previously seen doctors"
     })))
+}
+
+// ==============================================================================
+// ASYNC BOOKING HANDLERS
+// ==============================================================================
+
+/// Get booking job status
+#[axum::debug_handler]
+pub async fn get_booking_status(
+    State(state): State<Arc<AppConfig>>,
+    Path(job_id): Path<Uuid>,
+    TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
+    Extension(user): Extension<User>,
+) -> Result<Json<Value>, AppError> {
+    let _token = auth.token();
+    
+    match try_get_booking_status(&state, job_id).await {
+        Ok(Some(job)) => {
+            // Verify authorization - only patient who made the booking or admin
+            let is_patient = job.patient_id.to_string() == user.id;
+            let is_admin = user.role.as_deref() == Some("admin");
+            
+            if !is_patient && !is_admin {
+                return Err(AppError::Auth("Not authorized to view this booking status".to_string()));
+            }
+            
+            Ok(Json(json!({
+                "job_id": job.job_id,
+                "patient_id": job.patient_id,
+                "status": job.status,
+                "created_at": job.created_at,
+                "updated_at": job.updated_at,
+                "completed_at": job.completed_at,
+                "retry_count": job.retry_count,
+                "max_retries": job.max_retries,
+                "error_message": job.error_message,
+                "worker_id": job.worker_id
+            })))
+        }
+        Ok(None) => Err(AppError::NotFound("Booking job not found".to_string())),
+        Err(_) => Err(AppError::Internal("Booking queue service unavailable".to_string()))
+    }
+}
+
+/// Cancel booking job
+#[axum::debug_handler]
+pub async fn cancel_booking(
+    State(state): State<Arc<AppConfig>>,
+    Path(job_id): Path<Uuid>,
+    TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
+    Extension(user): Extension<User>,
+) -> Result<Json<Value>, AppError> {
+    let _token = auth.token();
+    
+    // First verify the job exists and user has permission
+    match try_get_booking_status(&state, job_id).await {
+        Ok(Some(job)) => {
+            let is_patient = job.patient_id.to_string() == user.id;
+            let is_admin = user.role.as_deref() == Some("admin");
+            
+            if !is_patient && !is_admin {
+                return Err(AppError::Auth("Not authorized to cancel this booking".to_string()));
+            }
+            
+            // Cancel the job
+            match try_cancel_booking(&state, job_id).await {
+                Ok(()) => Ok(Json(json!({
+                    "success": true,
+                    "job_id": job_id,
+                    "message": "Booking cancelled successfully"
+                }))),
+                Err(_) => Err(AppError::Internal("Failed to cancel booking".to_string()))
+            }
+        }
+        Ok(None) => Err(AppError::NotFound("Booking job not found".to_string())),
+        Err(_) => Err(AppError::Internal("Booking queue service unavailable".to_string()))
+    }
+}
+
+/// Retry failed booking job
+#[axum::debug_handler]
+pub async fn retry_booking(
+    State(state): State<Arc<AppConfig>>,
+    Path(job_id): Path<Uuid>,
+    TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
+    Extension(user): Extension<User>,
+) -> Result<Json<Value>, AppError> {
+    let _token = auth.token();
+    
+    // First verify the job exists and user has permission
+    match try_get_booking_status(&state, job_id).await {
+        Ok(Some(job)) => {
+            let is_patient = job.patient_id.to_string() == user.id;
+            let is_admin = user.role.as_deref() == Some("admin");
+            
+            if !is_patient && !is_admin {
+                return Err(AppError::Auth("Not authorized to retry this booking".to_string()));
+            }
+            
+            // Retry the job
+            match try_retry_booking(&state, job_id).await {
+                Ok(()) => Ok(Json(json!({
+                    "success": true,
+                    "job_id": job_id,
+                    "message": "Booking retry initiated successfully"
+                }))),
+                Err(_) => Err(AppError::Internal("Failed to retry booking".to_string()))
+            }
+        }
+        Ok(None) => Err(AppError::NotFound("Booking job not found".to_string())),
+        Err(_) => Err(AppError::Internal("Booking queue service unavailable".to_string()))
+    }
+}
+
+/// Get queue statistics (admin only)
+#[axum::debug_handler]
+pub async fn get_queue_stats(
+    State(state): State<Arc<AppConfig>>,
+    TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
+    Extension(user): Extension<User>,
+) -> Result<Json<Value>, AppError> {
+    let _token = auth.token();
+    
+    // Only admins can view queue stats
+    if user.role.as_deref() != Some("admin") {
+        return Err(AppError::Auth("Not authorized to view queue statistics".to_string()));
+    }
+    
+    match try_get_queue_stats(&state).await {
+        Ok(stats) => Ok(Json(json!(stats))),
+        Err(_) => Err(AppError::Internal("Booking queue service unavailable".to_string()))
+    }
+}
+
+// ==============================================================================
+// ASYNC BOOKING HELPER FUNCTIONS
+// ==============================================================================
+
+async fn try_async_booking(
+    config: &AppConfig,
+    request: SmartBookingRequest,
+    token: &str,
+) -> Result<booking_queue_cell::BookingJobResponse, Box<dyn std::error::Error + Send + Sync>> {
+    use booking_queue_cell::{BookingConsumerService, WorkerConfig};
+    
+    let worker_config = WorkerConfig::default();
+    let consumer = BookingConsumerService::new(worker_config, std::sync::Arc::new(config.clone())).await?;
+    
+    // Convert appointment-cell types to booking-queue-cell types
+    let queue_request = booking_queue_cell::SmartBookingRequest {
+        patient_id: request.patient_id,
+        specialty: request.specialty_required,
+        urgency: Some(booking_queue_cell::BookingUrgency::Normal), // Default urgency
+        preferred_doctor_id: None, // Not available in current model
+        preferred_time_slot: if let (Some(date), Some(time)) = (request.preferred_date, request.preferred_time_start) {
+            Some(date.and_time(time).and_utc())
+        } else {
+            None
+        },
+        alternative_time_slots: None, // Not available in current model
+        appointment_type: Some(match request.appointment_type {
+            crate::models::AppointmentType::InitialConsultation => booking_queue_cell::AppointmentType::InitialConsultation,
+            crate::models::AppointmentType::FollowUpConsultation => booking_queue_cell::AppointmentType::FollowUpConsultation,
+            crate::models::AppointmentType::EmergencyConsultation => booking_queue_cell::AppointmentType::Emergency,
+            crate::models::AppointmentType::SpecialtyConsultation => booking_queue_cell::AppointmentType::Specialist,
+            _ => booking_queue_cell::AppointmentType::InitialConsultation, // Default fallback
+        }),
+        reason_for_visit: request.patient_notes.clone(),
+        consultation_mode: Some(booking_queue_cell::ConsultationMode::InPerson), // Default mode
+        is_follow_up: Some(matches!(request.appointment_type, crate::models::AppointmentType::FollowUpConsultation)),
+        notes: request.patient_notes,
+    };
+    
+    consumer.enqueue_booking(queue_request, token).await.map_err(Into::into)
+}
+
+async fn try_get_booking_status(
+    config: &AppConfig,
+    job_id: Uuid,
+) -> Result<Option<booking_queue_cell::BookingJob>, Box<dyn std::error::Error + Send + Sync>> {
+    use booking_queue_cell::{BookingConsumerService, WorkerConfig};
+    
+    let worker_config = WorkerConfig::default();
+    let consumer = BookingConsumerService::new(worker_config, std::sync::Arc::new(config.clone())).await?;
+    consumer.get_job_status(job_id).await.map_err(Into::into)
+}
+
+async fn try_cancel_booking(
+    config: &AppConfig,
+    job_id: Uuid,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use booking_queue_cell::{BookingConsumerService, WorkerConfig};
+    
+    let worker_config = WorkerConfig::default();
+    let consumer = BookingConsumerService::new(worker_config, std::sync::Arc::new(config.clone())).await?;
+    consumer.cancel_job(job_id).await.map_err(Into::into)
+}
+
+async fn try_retry_booking(
+    config: &AppConfig,
+    job_id: Uuid,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use booking_queue_cell::{BookingConsumerService, WorkerConfig};
+    
+    let worker_config = WorkerConfig::default();
+    let consumer = BookingConsumerService::new(worker_config, std::sync::Arc::new(config.clone())).await?;
+    consumer.retry_job(job_id).await.map_err(Into::into)
+}
+
+async fn try_get_queue_stats(
+    config: &AppConfig,
+) -> Result<booking_queue_cell::QueueStats, Box<dyn std::error::Error + Send + Sync>> {
+    use booking_queue_cell::{BookingConsumerService, WorkerConfig};
+    
+    let worker_config = WorkerConfig::default();
+    let consumer = BookingConsumerService::new(worker_config, std::sync::Arc::new(config.clone())).await?;
+    Ok(consumer.get_queue_stats().await)
 }
