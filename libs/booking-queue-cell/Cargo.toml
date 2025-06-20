@@ -23,6 +23,7 @@ thiserror = { workspace = true }
 shared-config = { workspace = true }
 shared-database = { workspace = true }
 shared-models = { workspace = true }
+shared-utils = { workspace = true }
 
 # Cell dependencies for integration
 doctor-cell = { workspace = true }

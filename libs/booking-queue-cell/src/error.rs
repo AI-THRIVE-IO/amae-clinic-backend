@@ -28,4 +28,10 @@ pub enum BookingQueueError {
     
     #[error("Maximum retry attempts ({max_retries}) exceeded for job {job_id}")]
     MaxRetriesExceeded { job_id: String, max_retries: u32 },
+    
+    #[error("Validation error: {0}")]
+    ValidationError(String),
+    
+    #[error("Processing error: {0}")]
+    ProcessingError(String),
 }

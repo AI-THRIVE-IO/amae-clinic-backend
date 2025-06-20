@@ -1,0 +1,15 @@
+[package]
+name = "endpoint-integration-tests"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "endpoint_tests"
+path = "endpoint_integration_tests.rs"
+
+[dependencies]
+tokio = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }

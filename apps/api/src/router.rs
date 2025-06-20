@@ -9,6 +9,7 @@ use auth_cell::router::auth_routes;
 use health_profile_cell::router::health_profile_routes;
 use doctor_cell::router::doctor_routes;
 use appointment_cell::router::appointment_routes;
+use booking_queue_cell::create_booking_queue_router;
 use video_conferencing_cell::router::video_conferencing_routes;
 use patient_cell::router::create_patient_router;
 use security_cell::create_security_router;
@@ -23,6 +24,7 @@ pub fn create_router(state: Arc<AppConfig>) -> Router {
         .nest("/health", health_profile_routes(state.clone()))
         .nest("/doctors", doctor_routes(state.clone()))
         .nest("/appointments", appointment_routes(state.clone()))
+        .nest("/booking-queue", create_booking_queue_router(state.clone()))
         .nest("/video", video_conferencing_routes(state.clone()))
         .nest("/patients", create_patient_router(state.clone()))
         .nest("/security", create_security_router(state.clone()))
