@@ -346,9 +346,7 @@ pub struct DoctorAvailability {
     pub day_of_week: i32, // 0 = Sunday, 1 = Monday, etc.
     pub duration_minutes: i32,
     pub is_available: bool,
-    #[serde(alias = "start_time")]
     pub morning_start_time: Option<DateTime<Utc>>,
-    #[serde(alias = "end_time")]
     pub morning_end_time: Option<DateTime<Utc>>,
     pub afternoon_start_time: Option<DateTime<Utc>>,
     pub afternoon_end_time: Option<DateTime<Utc>>,
@@ -451,9 +449,9 @@ pub struct CreateAvailabilityRequest {
     pub day_of_week: i32,
     #[serde(alias = "slot_duration_minutes")]
     pub duration_minutes: i32,
-    #[serde(alias = "start_time", deserialize_with = "deserialize_optional_time_from_string")]
+    #[serde(deserialize_with = "deserialize_optional_time_from_string")]
     pub morning_start_time: Option<DateTime<Utc>>,
-    #[serde(alias = "end_time", deserialize_with = "deserialize_optional_time_from_string")]
+    #[serde(deserialize_with = "deserialize_optional_time_from_string")]
     pub morning_end_time: Option<DateTime<Utc>>,
     #[serde(deserialize_with = "deserialize_optional_time_from_string")]
     pub afternoon_start_time: Option<DateTime<Utc>>,
