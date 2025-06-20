@@ -360,6 +360,7 @@ name = "booking-queue-cell"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "assert_matches",
  "axum",
  "axum-extra",
  "chrono",
@@ -373,10 +374,14 @@ dependencies = [
  "shared-config",
  "shared-database",
  "shared-models",
+ "shared-utils",
+ "tempfile",
  "thiserror",
  "tokio",
+ "tokio-test",
  "tracing",
  "uuid",
+ "wiremock",
 ]
 
 [[package]]
