@@ -853,8 +853,9 @@ impl AppointmentBookingService {
             timezone: request.timezone.clone(),
         };
 
+        // Reduce alternative doctors from 8 to 3 for performance
         let matches = self.doctor_matching_service
-            .find_matching_doctors(matching_request, auth_token, Some(8))
+            .find_matching_doctors(matching_request, auth_token, Some(3))
             .await
             .map_err(|e| AppointmentError::DoctorMatchingError(e.to_string()))?;
 
@@ -864,7 +865,7 @@ impl AppointmentBookingService {
                 continue; // Skip the already selected doctor
             }
 
-            for slot in doctor_match.available_slots.iter().take(3) { // Max 3 slots per doctor
+            for slot in doctor_match.available_slots.iter().take(2) { // Max 2 slots per doctor for performance
                 let has_history = doctor_match.match_reasons.iter()
                     .any(|reason| reason.contains("Previous patient"));
 

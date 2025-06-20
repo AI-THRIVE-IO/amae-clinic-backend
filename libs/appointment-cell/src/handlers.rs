@@ -84,7 +84,13 @@ pub async fn smart_book_appointment(
     
     let booking_service = AppointmentBookingService::new(&state);
     
-    let smart_booking_response = booking_service.smart_book_appointment(request, token).await
+    // Add timeout protection for smart booking operations
+    let smart_booking_future = booking_service.smart_book_appointment(request, token);
+    let timeout_duration = std::time::Duration::from_secs(30); // 30 second timeout
+    
+    let smart_booking_response = tokio::time::timeout(timeout_duration, smart_booking_future)
+        .await
+        .map_err(|_| AppError::Internal("Smart booking operation timed out. Please try again.".to_string()))?
         .map_err(|e| match e {
             AppointmentError::SpecialtyNotAvailable { specialty } => {
                 AppError::NotFound(format!("No {} doctors available at this time", specialty))
