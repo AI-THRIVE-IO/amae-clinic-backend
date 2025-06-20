@@ -346,14 +346,20 @@ pub struct DoctorAvailability {
     pub day_of_week: i32, // 0 = Sunday, 1 = Monday, etc.
     pub duration_minutes: i32,
     pub is_available: bool,
+    #[serde(alias = "start_time")]
     pub morning_start_time: Option<DateTime<Utc>>,
+    #[serde(alias = "end_time")]
     pub morning_end_time: Option<DateTime<Utc>>,
     pub afternoon_start_time: Option<DateTime<Utc>>,
     pub afternoon_end_time: Option<DateTime<Utc>>,
     // Enhanced medical scheduling fields
+    #[serde(default)]
     pub appointment_type: AppointmentType,
+    #[serde(default = "default_buffer_minutes_i32")]
     pub buffer_minutes: i32,
+    #[serde(default = "default_max_concurrent_i32")]
     pub max_concurrent_appointments: i32,
+    #[serde(default = "default_true_bool")]
     pub is_recurring: bool,
     pub specific_date: Option<NaiveDate>,
     pub created_at: DateTime<Utc>,
@@ -473,8 +479,11 @@ pub struct CreateAvailabilityRequest {
 
 // Helper functions for defaults
 fn default_true() -> Option<bool> { Some(true) }
+fn default_true_bool() -> bool { true }
 fn default_buffer_minutes() -> Option<i32> { Some(10) }
+fn default_buffer_minutes_i32() -> i32 { 10 }
 fn default_max_concurrent() -> Option<i32> { Some(1) }
+fn default_max_concurrent_i32() -> i32 { 1 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateAvailabilityRequest {
