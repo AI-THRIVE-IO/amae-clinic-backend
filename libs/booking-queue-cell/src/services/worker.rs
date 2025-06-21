@@ -346,10 +346,7 @@ impl BookingWorkerService {
             debug!("Queue stats: queued={}, processing={}, completed_today={}, failed_today={}", 
                    stats.queued_jobs, stats.processing_jobs, stats.completed_today, stats.failed_today);
             
-            // Clean up expired jobs
-            if let Err(e) = self.queue.cleanup_expired_jobs().await {
-                warn!("Failed to cleanup expired jobs: {}", e);
-            }
+            // Note: Cleanup is handled by the consumer service to avoid duplicate processing
         }
         
         Ok(())

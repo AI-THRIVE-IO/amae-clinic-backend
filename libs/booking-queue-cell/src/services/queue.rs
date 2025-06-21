@@ -253,7 +253,11 @@ impl RedisQueueService {
             }
         }
         
-        info!("Cleaned up {} expired jobs", cleaned);
+        if cleaned > 0 {
+            info!("Cleaned up {} expired jobs", cleaned);
+        } else {
+            debug!("No expired jobs found to clean up");
+        }
         Ok(cleaned)
     }
     
