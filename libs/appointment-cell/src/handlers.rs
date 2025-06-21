@@ -854,3 +854,71 @@ async fn try_get_queue_stats(
     let consumer = BookingConsumerService::new(worker_config, std::sync::Arc::new(config.clone())).await?;
     Ok(consumer.get_queue_stats().await)
 }
+
+// ==============================================================================
+// ENHANCED CONSISTENCY HANDLERS
+// ==============================================================================
+
+/// Enhanced consistency check for appointment scheduling
+#[axum::debug_handler]
+pub async fn check_scheduling_consistency(
+    State(state): State<Arc<AppConfig>>,
+    Query(params): Query<EnhancedConsistencyQuery>,
+    TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
+    Extension(user): Extension<User>,
+) -> Result<Json<Value>, AppError> {
+    let token = auth.token();
+    
+    // Authorization check - only doctors and admins can perform consistency checks
+    match user.role.as_deref() {
+        Some("admin") | Some("doctor") => {},
+        _ => return Err(AppError::Auth("Insufficient permissions for consistency check".to_string())),
+    }
+    
+    let booking_service = AppointmentBookingService::new(&state);
+    
+    // Perform comprehensive consistency check
+    let consistency_result = booking_service.check_comprehensive_scheduling_consistency(
+        params.doctor_id,
+        params.start_time,
+        params.end_time,
+        params.appointment_type,
+        token,
+    ).await.map_err(|e| AppError::Internal(e.to_string()))?;
+    
+    Ok(Json(json!({
+        "consistency_check": consistency_result,
+        "timestamp": Utc::now().to_rfc3339(),
+        "service": "enhanced_scheduling_consistency"
+    })))
+}
+
+/// Monitor scheduling system health and performance
+#[axum::debug_handler]
+pub async fn get_scheduling_health(
+    State(state): State<Arc<AppConfig>>,
+    TypedHeader(_auth): TypedHeader<Authorization<Bearer>>,
+    Extension(user): Extension<User>,
+) -> Result<Json<Value>, AppError> {
+    // Only admins can access health monitoring
+    match user.role.as_deref() {
+        Some("admin") => {},
+        _ => return Err(AppError::Auth("Insufficient permissions for health monitoring".to_string())),
+    }
+    
+    let booking_service = AppointmentBookingService::new(&state);
+    
+    let health_data = booking_service.monitor_scheduling_health()
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    
+    Ok(Json(health_data))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EnhancedConsistencyQuery {
+    pub doctor_id: Uuid,
+    pub start_time: DateTime<Utc>,
+    pub end_time: DateTime<Utc>,
+    pub appointment_type: AppointmentType,
+}

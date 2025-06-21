@@ -385,3 +385,53 @@ impl Default for AppointmentValidationRules {
         }
     }
 }
+
+// ==============================================================================
+// SCHEDULING CONSISTENCY MODELS
+// ==============================================================================
+
+/// Distributed scheduling lock for preventing race conditions
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SchedulingLock {
+    pub id: Uuid,
+    pub lock_key: String,
+    pub doctor_id: Uuid,
+    pub acquired_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+    pub process_id: String,
+}
+
+/// Result of comprehensive consistency check
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConsistencyCheckResult {
+    pub is_consistent: bool,
+    pub issues: Vec<String>,
+    pub recommendations: Vec<String>,
+    pub suggested_alternatives: Vec<SuggestedSlot>,
+}
+
+/// Enhanced appointment conflict check request
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnhancedConflictCheckRequest {
+    pub doctor_id: Uuid,
+    pub patient_id: Uuid,
+    pub start_time: DateTime<Utc>,
+    pub end_time: DateTime<Utc>,
+    pub appointment_type: AppointmentType,
+    pub exclude_appointment_id: Option<Uuid>,
+    pub check_buffer_time: bool,
+    pub buffer_minutes: Option<i32>,
+}
+
+/// Scheduling analytics and monitoring data
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SchedulingMetrics {
+    pub total_bookings_attempted: u64,
+    pub successful_bookings: u64,
+    pub failed_bookings: u64,
+    pub conflict_rate: f64,
+    pub average_booking_time_ms: f64,
+    pub peak_concurrency: u32,
+    pub lock_contention_events: u64,
+    pub timestamp: DateTime<Utc>,
+}

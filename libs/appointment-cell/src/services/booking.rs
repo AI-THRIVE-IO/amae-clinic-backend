@@ -24,12 +24,14 @@ use crate::models::{
     AlternativeSlot
 };
 use crate::services::conflict::ConflictDetectionService;
+use crate::services::consistency::SchedulingConsistencyService;
 use crate::services::lifecycle::AppointmentLifecycleService;
 use crate::services::telemedicine::TelemedicineService;
 
 pub struct AppointmentBookingService {
     supabase: Arc<SupabaseClient>,
     conflict_service: ConflictDetectionService,
+    consistency_service: SchedulingConsistencyService,
     lifecycle_service: AppointmentLifecycleService,
     doctor_matching_service: DoctorMatchingService,
     telemedicine_service: TelemedicineService,
@@ -47,12 +49,21 @@ impl AppointmentBookingService {
             medical_config.default_buffer_minutes,
             true, // Enable concurrent appointments
         );
+        let consistency_service = SchedulingConsistencyService::new(
+            Arc::clone(&supabase),
+            Arc::new(ConflictDetectionService::with_config(
+                Arc::clone(&supabase),
+                medical_config.default_buffer_minutes,
+                true,
+            )),
+        );
         let lifecycle_service = AppointmentLifecycleService::new();
         let doctor_matching_service = DoctorMatchingService::new(config);
         let telemedicine_service = TelemedicineService::new(Arc::clone(&supabase));
 
         Self {
             conflict_service,
+            consistency_service,
             lifecycle_service,
             doctor_matching_service,
             telemedicine_service,
@@ -70,12 +81,21 @@ impl AppointmentBookingService {
             medical_config.default_buffer_minutes,
             true,
         );
+        let consistency_service = SchedulingConsistencyService::new(
+            Arc::clone(&supabase),
+            Arc::new(ConflictDetectionService::with_config(
+                Arc::clone(&supabase),
+                medical_config.default_buffer_minutes,
+                true,
+            )),
+        );
         let lifecycle_service = AppointmentLifecycleService::new();
         let doctor_matching_service = DoctorMatchingService::new(config);
         let telemedicine_service = TelemedicineService::new(Arc::clone(&supabase));
 
         Self {
             conflict_service,
+            consistency_service,
             lifecycle_service,
             doctor_matching_service,
             telemedicine_service,
@@ -1907,5 +1927,57 @@ impl AppointmentBookingService {
         }
         
         Ok(())
+    }
+
+    // ==============================================================================
+    // ENHANCED SCHEDULING CONSISTENCY METHODS
+    // ==============================================================================
+
+    /// Perform comprehensive scheduling consistency check
+    pub async fn check_comprehensive_scheduling_consistency(
+        &self,
+        doctor_id: Uuid,
+        start_time: DateTime<Utc>,
+        end_time: DateTime<Utc>,
+        appointment_type: AppointmentType,
+        auth_token: &str,
+    ) -> Result<crate::models::ConsistencyCheckResult, AppointmentError> {
+        self.consistency_service.comprehensive_consistency_check(
+            doctor_id,
+            start_time,
+            end_time,
+            appointment_type,
+            auth_token,
+        ).await
+    }
+
+    /// Perform atomic appointment booking with transaction-level guarantees
+    pub async fn atomic_appointment_booking(
+        &self,
+        doctor_id: Uuid,
+        patient_id: Uuid,
+        start_time: DateTime<Utc>,
+        end_time: DateTime<Utc>,
+        appointment_type: AppointmentType,
+        auth_token: &str,
+    ) -> Result<Uuid, AppointmentError> {
+        self.consistency_service.atomic_appointment_booking(
+            doctor_id,
+            patient_id,
+            start_time,
+            end_time,
+            appointment_type,
+            auth_token,
+        ).await
+    }
+
+    /// Monitor scheduling system health and performance
+    pub async fn monitor_scheduling_health(&self) -> Result<Value, AppointmentError> {
+        self.consistency_service.monitor_scheduling_health().await
+    }
+
+    /// Cleanup expired scheduling locks (should be called periodically)
+    pub async fn cleanup_expired_scheduling_locks(&self) -> Result<u32, AppointmentError> {
+        self.consistency_service.cleanup_expired_locks().await
     }
 }

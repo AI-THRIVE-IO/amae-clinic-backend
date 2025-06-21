@@ -39,6 +39,8 @@ pub fn appointment_routes(state: Arc<AppConfig>) -> Router {
         
         // Utility endpoints
         .route("/conflicts/check", get(handlers::check_appointment_conflicts))
+        .route("/consistency/check", get(handlers::check_scheduling_consistency)) // NEW: Enhanced consistency check
+        .route("/consistency/health", get(handlers::get_scheduling_health)) // NEW: Scheduling health monitoring
         .route("/stats", get(handlers::get_appointment_stats)) // ENHANCED: Now includes continuity metrics
         
         .layer(middleware::from_fn_with_state(state.clone(), auth_middleware));
