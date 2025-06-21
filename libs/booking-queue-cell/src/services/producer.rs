@@ -20,7 +20,7 @@ impl BookingProducerService {
         request: crate::SmartBookingRequest,
         auth_token: &str,
     ) -> Result<BookingJobResponse, BookingQueueError> {
-        let job = BookingJob::new(request.patient_id, request);
+        let job = BookingJob::new(request.patient_id, request, auth_token.to_string());
         
         // Store job in queue
         self.queue.enqueue_job(&job).await?;

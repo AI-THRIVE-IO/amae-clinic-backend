@@ -156,8 +156,8 @@ impl BookingWorkerService {
         
         info!("Processing job {} with worker {}", job.job_id, worker_name);
         
-        // Create a mock auth token for processing (in production, this would be handled differently)
-        let auth_token = "system_worker_token";
+        // Use the real JWT token stored with the job for proper authentication
+        let auth_token = &job.auth_token;
         
         let job_timeout = Duration::from_secs(self.config.job_timeout_seconds);
         
@@ -166,7 +166,7 @@ impl BookingWorkerService {
             let step_start = Instant::now();
             self.update_job_status_and_notify(&job, BookingStatus::DoctorMatching).await?;
             
-            let doctor_match_result = self.perform_doctor_matching(&job).await;
+            let doctor_match_result = self.perform_doctor_matching(&job, auth_token).await;
             let step_duration = step_start.elapsed();
             metrics.doctor_matching_ms = step_duration.as_millis() as u64;
             
@@ -377,7 +377,7 @@ impl BookingWorkerService {
     
     // Real service implementations
     
-    async fn perform_doctor_matching(&self, job: &BookingJob) -> Result<String, BookingQueueError> {
+    async fn perform_doctor_matching(&self, job: &BookingJob, auth_token: &str) -> Result<String, BookingQueueError> {
         info!("Starting doctor matching for job {}", job.job_id);
         
         let matching_request = DoctorMatchingRequest {
@@ -393,9 +393,8 @@ impl BookingWorkerService {
             timezone: "UTC".to_string(), // Default timezone
         };
         
-        let _auth_token = "system_worker_token";
         let matches = self.doctor_matching_service
-            .find_matching_doctors(matching_request, _auth_token, Some(5))
+            .find_matching_doctors(matching_request, auth_token, Some(5))
             .await
             .map_err(|e| BookingQueueError::ProcessingError(format!("Doctor matching failed: {}", e)))?;
         

@@ -8,6 +8,7 @@ pub struct BookingJob {
     pub job_id: Uuid,
     pub patient_id: Uuid,
     pub request: SmartBookingRequest,
+    pub auth_token: String, // CRITICAL: Store JWT token for worker authentication
     pub status: BookingStatus,
     pub retry_count: u32,
     pub max_retries: u32,
@@ -230,12 +231,13 @@ impl Default for WorkerConfig {
 }
 
 impl BookingJob {
-    pub fn new(patient_id: Uuid, request: SmartBookingRequest) -> Self {
+    pub fn new(patient_id: Uuid, request: SmartBookingRequest, auth_token: String) -> Self {
         let now = Utc::now();
         Self {
             job_id: Uuid::new_v4(),
             patient_id,
             request,
+            auth_token, // CRITICAL: Store JWT token with job
             status: BookingStatus::Queued,
             retry_count: 0,
             max_retries: 3,
