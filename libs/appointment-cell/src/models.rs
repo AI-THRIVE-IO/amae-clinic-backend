@@ -48,6 +48,7 @@ impl Appointment {
 pub enum AppointmentStatus {
     Pending,
     Confirmed,
+    Ready,        // NEW: Video session created, ready to join (15-30 min before)
     InProgress,
     Completed,
     Cancelled,
@@ -60,6 +61,7 @@ impl fmt::Display for AppointmentStatus {
         match self {
             AppointmentStatus::Pending => write!(f, "pending"),
             AppointmentStatus::Confirmed => write!(f, "confirmed"),
+            AppointmentStatus::Ready => write!(f, "ready"),
             AppointmentStatus::InProgress => write!(f, "in_progress"),
             AppointmentStatus::Completed => write!(f, "completed"),
             AppointmentStatus::Cancelled => write!(f, "cancelled"),
@@ -353,6 +355,18 @@ pub enum AppointmentError {
     
     #[error("Doctor matching service error: {0}")]
     DoctorMatchingError(String),
+    
+    #[error("Video session not found")]
+    VideoSessionNotFound,
+    
+    #[error("Video session creation failed")]
+    VideoSessionCreationFailed,
+    
+    #[error("Video session operation failed: {0}")]
+    VideoSessionError(String),
+    
+    #[error("Video conferencing service unavailable")]
+    VideoServiceUnavailable,
 }
 
 // ==============================================================================
@@ -434,4 +448,255 @@ pub struct SchedulingMetrics {
     pub peak_concurrency: u32,
     pub lock_contention_events: u64,
     pub timestamp: DateTime<Utc>,
+}
+
+// ==============================================================================
+// VIDEO CONFERENCE INTEGRATION MODELS
+// ==============================================================================
+
+/// Enhanced appointment model with video session management
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppointmentWithVideo {
+    pub appointment: Appointment,
+    pub video_session: Option<VideoSessionInfo>,
+    pub video_readiness: VideoReadinessStatus,
+    pub join_urls: Option<VideoJoinUrls>,
+}
+
+/// Video session information linked to appointment
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VideoSessionInfo {
+    pub session_id: Uuid,
+    pub cloudflare_session_id: String,
+    pub status: VideoSessionStatus,
+    pub created_at: DateTime<Utc>,
+    pub scheduled_start_time: DateTime<Utc>,
+    pub actual_start_time: Option<DateTime<Utc>>,
+    pub actual_end_time: Option<DateTime<Utc>>,
+    pub participant_count: i32,
+    pub session_duration_minutes: Option<i32>,
+    pub connection_quality: Option<String>,
+}
+
+/// Video session status tracking
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum VideoSessionStatus {
+    Pending,      // Video session not yet created
+    Created,      // Session created in Cloudflare but not active
+    Ready,        // Participants can join (15-30 min before appointment)
+    Active,       // Session in progress
+    Ended,        // Session completed successfully
+    Failed,       // Session failed due to technical issues
+    Cancelled,    // Session cancelled before starting
+}
+
+/// Video readiness status for appointments
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum VideoReadinessStatus {
+    NotRequired,     // Appointment doesn't require video
+    Pending,         // Video required but not yet ready
+    Ready,           // Video session ready, participants can join
+    TestRequired,    // Participant needs to test their connection
+    TechnicalIssue,  // Technical problems preventing video access
+    Degraded,        // Video available but with quality issues
+}
+
+/// Video join URLs and access information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VideoJoinUrls {
+    pub patient_join_url: String,
+    pub doctor_join_url: String,
+    pub session_id: String,
+    pub access_expires_at: DateTime<Utc>,
+    pub pre_session_test_url: Option<String>,
+    pub session_instructions: SessionInstructions,
+}
+
+/// Session instructions for optimal user experience
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionInstructions {
+    pub patient_instructions: Vec<String>,
+    pub doctor_instructions: Vec<String>,
+    pub technical_requirements: TechnicalRequirements,
+    pub troubleshooting_url: String,
+    pub support_contact: String,
+}
+
+/// Technical requirements for video sessions
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TechnicalRequirements {
+    pub minimum_bandwidth_mbps: f32,
+    pub supported_browsers: Vec<String>,
+    pub camera_required: bool,
+    pub microphone_required: bool,
+    pub screen_sharing_enabled: bool,
+    pub mobile_app_available: bool,
+}
+
+impl Default for TechnicalRequirements {
+    fn default() -> Self {
+        Self {
+            minimum_bandwidth_mbps: 1.5,
+            supported_browsers: vec![
+                "Chrome 90+".to_string(),
+                "Firefox 88+".to_string(),
+                "Safari 14+".to_string(),
+                "Edge 90+".to_string(),
+            ],
+            camera_required: true,
+            microphone_required: true,
+            screen_sharing_enabled: true,
+            mobile_app_available: true,
+        }
+    }
+}
+
+/// Video session lifecycle configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VideoSessionConfig {
+    pub session_ready_minutes_before: i32,  // When to make session available (default: 30)
+    pub session_auto_start_minutes_before: i32,  // When to auto-transition to Ready (default: 15)
+    pub session_timeout_minutes_after: i32,  // When to timeout if no one joins (default: 30)
+    pub max_session_duration_minutes: i32,   // Maximum session length (default: 120)
+    pub enable_session_recording: bool,       // Whether to record sessions
+    pub enable_waiting_room: bool,           // Whether to use waiting room feature
+    pub enable_screen_sharing: bool,         // Whether to allow screen sharing
+    pub enable_chat: bool,                   // Whether to enable in-session chat
+    pub quality_monitoring_enabled: bool,   // Whether to monitor connection quality
+}
+
+impl Default for VideoSessionConfig {
+    fn default() -> Self {
+        Self {
+            session_ready_minutes_before: 30,
+            session_auto_start_minutes_before: 15,
+            session_timeout_minutes_after: 30,
+            max_session_duration_minutes: 120,
+            enable_session_recording: false,  // Privacy-first default
+            enable_waiting_room: true,
+            enable_screen_sharing: true,
+            enable_chat: true,
+            quality_monitoring_enabled: true,
+        }
+    }
+}
+
+/// Appointment status transition request with video session management
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppointmentStatusUpdateRequest {
+    pub appointment_id: Uuid,
+    pub new_status: AppointmentStatus,
+    pub reason: Option<String>,
+    pub updated_by: Uuid,  // User ID of who made the change
+    pub video_session_action: VideoSessionAction,
+    pub notify_participants: bool,
+}
+
+/// Actions to take on video session during status transitions
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum VideoSessionAction {
+    NoAction,        // Don't modify video session
+    Create,          // Create new video session
+    Activate,        // Make session ready for participants
+    Start,           // Start the session (transition to Active)
+    End,             // End the session gracefully
+    Cancel,          // Cancel and cleanup session
+    Recreate,        // Cancel existing and create new session
+}
+
+/// Video session lifecycle events for audit and monitoring
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VideoSessionLifecycleEvent {
+    pub event_id: Uuid,
+    pub appointment_id: Uuid,
+    pub session_id: Uuid,
+    pub event_type: VideoSessionEventType,
+    pub event_timestamp: DateTime<Utc>,
+    pub triggered_by: VideoSessionTrigger,
+    pub event_data: Option<serde_json::Value>,
+    pub success: bool,
+    pub error_message: Option<String>,
+}
+
+/// Types of video session lifecycle events
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum VideoSessionEventType {
+    SessionCreated,
+    SessionReady,
+    ParticipantJoined,
+    ParticipantLeft,
+    SessionStarted,
+    SessionEnded,
+    SessionCancelled,
+    SessionFailed,
+    QualityDegraded,
+    QualityRestored,
+    RecordingStarted,
+    RecordingStopped,
+    ScreenShareStarted,
+    ScreenShareStopped,
+}
+
+/// What triggered a video session event
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum VideoSessionTrigger {
+    AppointmentStatusChange,
+    ScheduledTime,
+    UserAction,
+    SystemAutomatic,
+    TechnicalIssue,
+    AdminIntervention,
+}
+
+impl VideoSessionStatus {
+    /// Check if the session is in a state where participants can join
+    pub fn can_join(&self) -> bool {
+        matches!(self, VideoSessionStatus::Ready | VideoSessionStatus::Active)
+    }
+
+    /// Check if the session is active or ended
+    pub fn is_concluded(&self) -> bool {
+        matches!(self, VideoSessionStatus::Ended | VideoSessionStatus::Failed | VideoSessionStatus::Cancelled)
+    }
+}
+
+impl AppointmentStatus {
+    /// Determine if this status should trigger video session creation
+    pub fn should_create_video_session(&self) -> bool {
+        matches!(self, AppointmentStatus::Confirmed)
+    }
+
+    /// Determine if this status should make video session ready for joining
+    pub fn should_activate_video_session(&self) -> bool {
+        matches!(self, AppointmentStatus::Ready)
+    }
+
+    /// Determine if this status should start the video session
+    pub fn should_start_video_session(&self) -> bool {
+        matches!(self, AppointmentStatus::InProgress)
+    }
+
+    /// Determine if this status should end the video session
+    pub fn should_end_video_session(&self) -> bool {
+        matches!(self, AppointmentStatus::Completed | AppointmentStatus::NoShow | AppointmentStatus::Cancelled)
+    }
+
+    /// Get the optimal video session action for this status transition
+    pub fn get_video_session_action(&self, previous_status: &AppointmentStatus) -> VideoSessionAction {
+        match (previous_status, self) {
+            (_, AppointmentStatus::Confirmed) => VideoSessionAction::Create,
+            (_, AppointmentStatus::Ready) => VideoSessionAction::Activate,
+            (_, AppointmentStatus::InProgress) => VideoSessionAction::Start,
+            (_, AppointmentStatus::Completed) => VideoSessionAction::End,
+            (_, AppointmentStatus::Cancelled) => VideoSessionAction::Cancel,
+            (_, AppointmentStatus::NoShow) => VideoSessionAction::End,
+            (_, AppointmentStatus::Rescheduled) => VideoSessionAction::Recreate,
+            _ => VideoSessionAction::NoAction,
+        }
+    }
 }

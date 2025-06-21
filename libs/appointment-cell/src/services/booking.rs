@@ -27,6 +27,7 @@ use crate::services::conflict::ConflictDetectionService;
 use crate::services::consistency::SchedulingConsistencyService;
 use crate::services::lifecycle::AppointmentLifecycleService;
 use crate::services::telemedicine::TelemedicineService;
+use crate::services::video_lifecycle::VideoSessionLifecycleService;
 
 pub struct AppointmentBookingService {
     supabase: Arc<SupabaseClient>,
@@ -35,6 +36,7 @@ pub struct AppointmentBookingService {
     lifecycle_service: AppointmentLifecycleService,
     doctor_matching_service: DoctorMatchingService,
     telemedicine_service: TelemedicineService,
+    video_lifecycle_service: VideoSessionLifecycleService,
     validation_rules: AppointmentValidationRules,
     medical_config: MedicalSchedulingConfig,
 }
@@ -60,6 +62,7 @@ impl AppointmentBookingService {
         let lifecycle_service = AppointmentLifecycleService::new();
         let doctor_matching_service = DoctorMatchingService::new(config);
         let telemedicine_service = TelemedicineService::new(Arc::clone(&supabase));
+        let video_lifecycle_service = VideoSessionLifecycleService::new(config);
 
         Self {
             conflict_service,
@@ -67,6 +70,7 @@ impl AppointmentBookingService {
             lifecycle_service,
             doctor_matching_service,
             telemedicine_service,
+            video_lifecycle_service,
             supabase,
             validation_rules: AppointmentValidationRules::default(),
             medical_config,
@@ -92,6 +96,7 @@ impl AppointmentBookingService {
         let lifecycle_service = AppointmentLifecycleService::new();
         let doctor_matching_service = DoctorMatchingService::new(config);
         let telemedicine_service = TelemedicineService::new(Arc::clone(&supabase));
+        let video_lifecycle_service = VideoSessionLifecycleService::new(config);
 
         Self {
             conflict_service,
@@ -99,6 +104,7 @@ impl AppointmentBookingService {
             lifecycle_service,
             doctor_matching_service,
             telemedicine_service,
+            video_lifecycle_service,
             supabase,
             validation_rules: AppointmentValidationRules::default(),
             medical_config,
@@ -303,6 +309,90 @@ impl AppointmentBookingService {
 
         info!("Appointment {} updated successfully", appointment_id);
         Ok(updated_appointment)
+    }
+
+    /// NEW: Update appointment status with automatic video session lifecycle management
+    pub async fn update_appointment_status_with_video(
+        &self,
+        appointment_id: Uuid,
+        new_status: AppointmentStatus,
+        updated_by: Uuid,
+        reason: Option<String>,
+        auth_token: &str,
+    ) -> Result<Appointment, AppointmentError> {
+        // Get current appointment
+        let current_appointment = self.get_appointment(appointment_id, auth_token).await?;
+        let previous_status = current_appointment.status.clone();
+
+        // Validate status transition
+        self.lifecycle_service.validate_status_transition(
+            &previous_status,
+            &new_status,
+        )?;
+
+        // Handle video session lifecycle management
+        if let Err(e) = self.video_lifecycle_service.handle_appointment_status_change(
+            appointment_id,
+            previous_status.clone(),
+            new_status.clone(),
+            updated_by,
+            auth_token,
+        ).await {
+            warn!("Video session lifecycle management failed for appointment {}: {}", appointment_id, e);
+            // Continue with appointment update even if video fails (degraded mode)
+        }
+
+        // Update appointment status in database
+        let update_request = UpdateAppointmentRequest {
+            status: Some(new_status.clone()),
+            doctor_notes: None,
+            patient_notes: reason,
+            reschedule_to: None,
+            reschedule_duration: None,
+        };
+
+        let updated_appointment = self.update_appointment_record(
+            &current_appointment,
+            update_request,
+            auth_token,
+        ).await?;
+
+        info!("Appointment {} status updated: {} -> {}", appointment_id, previous_status, new_status);
+        Ok(updated_appointment)
+    }
+
+    /// NEW: Get appointment with video session information
+    pub async fn get_appointment_with_video(
+        &self,
+        appointment_id: Uuid,
+        auth_token: &str,
+    ) -> Result<crate::models::AppointmentWithVideo, AppointmentError> {
+        use crate::models::{AppointmentWithVideo, VideoReadinessStatus};
+
+        let appointment = self.get_appointment(appointment_id, auth_token).await?;
+        
+        // Try to get video session info
+        let video_session = match self.get_video_session_for_appointment(appointment_id, auth_token).await {
+            Ok(session) => Some(session),
+            Err(_) => None,
+        };
+
+        // Determine video readiness status
+        let video_readiness = self.determine_video_readiness_status(&appointment, &video_session);
+
+        // Get join URLs if session is ready
+        let join_urls = if video_readiness == VideoReadinessStatus::Ready {
+            self.get_join_urls_for_appointment(appointment_id, auth_token).await.ok()
+        } else {
+            None
+        };
+
+        Ok(AppointmentWithVideo {
+            appointment,
+            video_session,
+            video_readiness,
+            join_urls,
+        })
     }
 
     /// Reschedule an appointment to a new time
@@ -1979,5 +2069,142 @@ impl AppointmentBookingService {
     /// Cleanup expired scheduling locks (should be called periodically)
     pub async fn cleanup_expired_scheduling_locks(&self) -> Result<u32, AppointmentError> {
         self.consistency_service.cleanup_expired_locks().await
+    }
+
+    // ============================================================================
+    // VIDEO SESSION INTEGRATION HELPER METHODS
+    // ============================================================================
+
+    /// Get video session information for an appointment
+    async fn get_video_session_for_appointment(
+        &self,
+        appointment_id: Uuid,
+        auth_token: &str,
+    ) -> Result<crate::models::VideoSessionInfo, AppointmentError> {
+        use crate::models::VideoSessionInfo;
+        use reqwest::Method;
+
+        let response: Vec<Value> = self.supabase
+            .request::<Vec<Value>>(
+                Method::GET,
+                &format!("/video_sessions?appointment_id=eq.{}", appointment_id),
+                Some(auth_token),
+                None,
+            )
+            .await
+            .map_err(|e| AppointmentError::DatabaseError(format!("Failed to get video session: {}", e)))?;
+
+        let session_data = response.into_iter().next().ok_or(AppointmentError::VideoSessionNotFound)?;
+        
+        // Parse the video session data
+        Ok(VideoSessionInfo {
+            session_id: Uuid::parse_str(session_data.get("id").unwrap().as_str().unwrap()).unwrap(),
+            cloudflare_session_id: session_data.get("cloudflare_session_id").unwrap().as_str().unwrap().to_string(),
+            status: serde_json::from_value(session_data.get("status").unwrap().clone()).unwrap(),
+            created_at: chrono::DateTime::parse_from_rfc3339(
+                session_data.get("created_at").unwrap().as_str().unwrap()
+            ).unwrap().with_timezone(&Utc),
+            scheduled_start_time: chrono::DateTime::parse_from_rfc3339(
+                session_data.get("scheduled_start_time").unwrap().as_str().unwrap()
+            ).unwrap().with_timezone(&Utc),
+            actual_start_time: session_data.get("actual_start_time")
+                .and_then(|v| v.as_str())
+                .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                .map(|dt| dt.with_timezone(&Utc)),
+            actual_end_time: session_data.get("actual_end_time")
+                .and_then(|v| v.as_str())
+                .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                .map(|dt| dt.with_timezone(&Utc)),
+            participant_count: session_data.get("participant_count").unwrap_or(&json!(0)).as_i64().unwrap() as i32,
+            session_duration_minutes: session_data.get("session_duration_minutes")
+                .and_then(|v| v.as_i64())
+                .map(|v| v as i32),
+            connection_quality: session_data.get("connection_quality")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+        })
+    }
+
+    /// Determine video readiness status based on appointment and session state
+    fn determine_video_readiness_status(
+        &self,
+        appointment: &Appointment,
+        video_session: &Option<crate::models::VideoSessionInfo>,
+    ) -> crate::models::VideoReadinessStatus {
+        use crate::models::{VideoReadinessStatus, VideoSessionStatus};
+
+        // Check if appointment requires video
+        if appointment.video_conference_link.is_none() {
+            return VideoReadinessStatus::NotRequired;
+        }
+
+        // Check video session status
+        match video_session {
+            None => VideoReadinessStatus::Pending,
+            Some(session) => match session.status {
+                VideoSessionStatus::Pending => VideoReadinessStatus::Pending,
+                VideoSessionStatus::Created => VideoReadinessStatus::Pending,
+                VideoSessionStatus::Ready => VideoReadinessStatus::Ready,
+                VideoSessionStatus::Active => VideoReadinessStatus::Ready,
+                VideoSessionStatus::Ended => VideoReadinessStatus::NotRequired,
+                VideoSessionStatus::Failed => VideoReadinessStatus::TechnicalIssue,
+                VideoSessionStatus::Cancelled => VideoReadinessStatus::NotRequired,
+            }
+        }
+    }
+
+    /// Get join URLs for an appointment
+    async fn get_join_urls_for_appointment(
+        &self,
+        appointment_id: Uuid,
+        auth_token: &str,
+    ) -> Result<crate::models::VideoJoinUrls, AppointmentError> {
+        use crate::models::{VideoJoinUrls, SessionInstructions, TechnicalRequirements};
+        use reqwest::Method;
+
+        let response: Vec<Value> = self.supabase
+            .request::<Vec<Value>>(
+                Method::GET,
+                &format!("/video_session_urls?appointment_id=eq.{}&expires_at=gt.{}", 
+                        appointment_id, Utc::now().to_rfc3339()),
+                Some(auth_token),
+                None,
+            )
+            .await
+            .map_err(|e| AppointmentError::DatabaseError(format!("Failed to get join URLs: {}", e)))?;
+
+        let url_data = response.into_iter().next().ok_or(AppointmentError::VideoSessionNotFound)?;
+        
+        Ok(VideoJoinUrls {
+            patient_join_url: url_data.get("patient_join_url").unwrap().as_str().unwrap().to_string(),
+            doctor_join_url: url_data.get("doctor_join_url").unwrap().as_str().unwrap().to_string(),
+            session_id: "".to_string(), // TODO: Extract from URL or session
+            access_expires_at: chrono::DateTime::parse_from_rfc3339(
+                url_data.get("expires_at").unwrap().as_str().unwrap()
+            ).unwrap().with_timezone(&Utc),
+            pre_session_test_url: Some(format!("{}/video/test", self.supabase.get_base_url())),
+            session_instructions: SessionInstructions {
+                patient_instructions: vec![
+                    "Join 5-10 minutes before your appointment".to_string(),
+                    "Ensure you have a stable internet connection".to_string(),
+                    "Test your camera and microphone beforehand".to_string(),
+                    "Find a quiet, well-lit location for the call".to_string(),
+                ],
+                doctor_instructions: vec![
+                    "Review patient notes before joining".to_string(),
+                    "Ensure privacy and HIPAA compliance".to_string(),
+                    "Have prescription pad ready if needed".to_string(),
+                    "Test video quality before patient joins".to_string(),
+                ],
+                technical_requirements: TechnicalRequirements::default(),
+                troubleshooting_url: format!("{}/video/help", self.supabase.get_base_url()),
+                support_contact: "support@amaeclinic.ie".to_string(),
+            },
+        })
+    }
+
+    /// NEW: Automatic video session lifecycle management (to be called by scheduler)
+    pub async fn run_video_session_lifecycle_tasks(&self, auth_token: &str) -> Result<(), AppointmentError> {
+        self.video_lifecycle_service.run_scheduled_lifecycle_tasks(auth_token).await
     }
 }

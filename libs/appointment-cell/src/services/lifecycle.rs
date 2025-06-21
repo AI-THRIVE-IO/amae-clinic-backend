@@ -41,10 +41,16 @@ impl AppointmentLifecycleService {
                 AppointmentStatus::NoShow,
             ],
             AppointmentStatus::Confirmed => vec![
+                AppointmentStatus::Ready,
                 AppointmentStatus::InProgress,
                 AppointmentStatus::Cancelled,
                 AppointmentStatus::NoShow,
                 AppointmentStatus::Rescheduled,
+            ],
+            AppointmentStatus::Ready => vec![
+                AppointmentStatus::InProgress,
+                AppointmentStatus::Cancelled,
+                AppointmentStatus::NoShow,
             ],
             AppointmentStatus::InProgress => vec![
                 AppointmentStatus::Completed,
@@ -70,8 +76,8 @@ impl AppointmentLifecycleService {
     ) -> Result<bool, AppointmentError> {
         debug!("Checking if appointment can be started");
 
-        // Must be confirmed to start
-        if *current_status != AppointmentStatus::Confirmed {
+        // Must be confirmed or ready to start
+        if !matches!(current_status, AppointmentStatus::Confirmed | AppointmentStatus::Ready) {
             return Ok(false);
         }
 
@@ -91,8 +97,8 @@ impl AppointmentLifecycleService {
         scheduled_start_time: DateTime<Utc>,
         current_time: DateTime<Utc>,
     ) -> bool {
-        // Only mark as no-show if currently confirmed or pending
-        if !matches!(current_status, AppointmentStatus::Confirmed | AppointmentStatus::Pending) {
+        // Only mark as no-show if currently confirmed, pending, or ready
+        if !matches!(current_status, AppointmentStatus::Confirmed | AppointmentStatus::Pending | AppointmentStatus::Ready) {
             return false;
         }
 
@@ -124,6 +130,12 @@ impl AppointmentLifecycleService {
                     actions.push("Send reminder notification".to_string());
                 } else if self.should_mark_no_show(current_status, scheduled_start_time, current_time) {
                     actions.push("Mark as no-show".to_string());
+                }
+            },
+            AppointmentStatus::Ready => {
+                actions.push("Video session ready - participants can join".to_string());
+                if self.can_start_appointment(current_status, scheduled_start_time, current_time).unwrap_or(false) {
+                    actions.push("Start consultation".to_string());
                 }
             },
             AppointmentStatus::InProgress => {

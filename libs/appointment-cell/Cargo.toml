@@ -29,6 +29,7 @@ shared-models = { workspace = true }
 shared-utils = { workspace = true }
 doctor-cell = { workspace = true }  # For availability checks
 booking-queue-cell = { workspace = true }  # For async booking
+video-conferencing-cell = { workspace = true }  # For video session management
 
 [dev-dependencies]
 tokio-test = { workspace = true }

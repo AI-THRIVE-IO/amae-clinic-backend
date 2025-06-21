@@ -104,6 +104,7 @@ dependencies = [
  "tracing",
  "urlencoding",
  "uuid",
+ "video-conferencing-cell",
  "wiremock",
 ]
 
@@ -2457,7 +2458,6 @@ name = "video-conferencing-cell"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "appointment-cell",
  "assert_matches",
  "async-trait",
  "axum",

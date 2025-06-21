@@ -25,7 +25,6 @@ shared-config = { workspace = true }
 shared-database = { workspace = true }
 shared-models = { workspace = true }
 shared-utils = { workspace = true }
-appointment-cell = { workspace = true }  # For appointment integration
 
 [dev-dependencies]
 tokio-test = { workspace = true }
