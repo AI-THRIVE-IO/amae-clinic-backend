@@ -8,7 +8,7 @@ use tokio_test;
 use uuid::Uuid;
 use chrono::{Utc, Duration};
 use wiremock::{MockServer, Mock, ResponseTemplate};
-use wiremock::matchers::{method, path, header, body_json};
+use wiremock::matchers::{method, path, query_param};
 use serde_json::json;
 
 use shared_config::AppConfig;
@@ -25,6 +25,7 @@ fn create_test_config() -> AppConfig {
 
 fn create_video_config() -> VideoSessionConfig {
     VideoSessionConfig {
+        session_ready_minutes_before: 30,
         session_auto_start_minutes_before: 15,
         session_timeout_minutes_after: 30,
         enable_session_recording: true,
@@ -33,8 +34,6 @@ fn create_video_config() -> VideoSessionConfig {
         enable_waiting_room: true,
         max_session_duration_minutes: 60,
         quality_monitoring_enabled: true,
-        pre_session_check_enabled: true,
-        session_reminder_minutes_before: vec![60, 15, 5],
     }
 }
 
@@ -102,7 +101,8 @@ async fn test_video_session_lifecycle_with_mock_server() {
     
     // Mock appointment retrieval
     Mock::given(method("GET"))
-        .and(path(format!("/rest/v1/appointments?id=eq.{}", appointment_id)))
+        .and(path("/rest/v1/appointments"))
+        .and(query_param("id", format!("eq.{}", appointment_id)))
         .respond_with(ResponseTemplate::new(200).set_body_json(vec![appointment_data]))
         .mount(&mock_server)
         .await;
@@ -120,7 +120,8 @@ async fn test_video_session_lifecycle_with_mock_server() {
     
     // Mock appointment update
     Mock::given(method("PATCH"))
-        .and(path(format!("/rest/v1/appointments?id=eq.{}", appointment_id)))
+        .and(path("/rest/v1/appointments"))
+        .and(query_param("id", format!("eq.{}", appointment_id)))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
         .mount(&mock_server)
         .await;
@@ -176,15 +177,15 @@ async fn test_video_session_graceful_degradation() {
 async fn test_video_session_timing_optimization() {
     let config = create_test_config();
     let video_config = create_video_config();
-    let service = VideoSessionLifecycleService::with_config(&config, video_config);
+    let _service = VideoSessionLifecycleService::with_config(&config, video_config.clone());
     
     // Test timing configuration
     assert_eq!(video_config.session_auto_start_minutes_before, 15);
     assert_eq!(video_config.session_timeout_minutes_after, 30);
     assert_eq!(video_config.max_session_duration_minutes, 60);
     
-    // Verify reminder timing
-    assert_eq!(video_config.session_reminder_minutes_before, vec![60, 15, 5]);
+    // Verify timing configuration  
+    assert_eq!(video_config.session_ready_minutes_before, 30);
 }
 
 #[tokio::test]
@@ -195,7 +196,8 @@ async fn test_video_session_security_features() {
     // Verify security features are enabled
     assert!(video_config.enable_waiting_room, "Waiting room should be enabled for security");
     assert!(video_config.quality_monitoring_enabled, "Quality monitoring should be enabled");
-    assert!(video_config.pre_session_check_enabled, "Pre-session checks should be enabled");
+    assert!(video_config.enable_screen_sharing, "Screen sharing should be enabled");
+    assert!(video_config.enable_chat, "Chat should be enabled");
 }
 
 #[tokio::test]
@@ -239,9 +241,9 @@ async fn test_video_session_lifecycle_events() {
     
     let triggers = vec![
         VideoSessionTrigger::AppointmentStatusChange,
-        VideoSessionTrigger::ScheduledTask,
+        VideoSessionTrigger::ScheduledTime,
         VideoSessionTrigger::UserAction,
-        VideoSessionTrigger::SystemEvent,
+        VideoSessionTrigger::SystemAutomatic,
     ];
     
     // Verify all event types and triggers are available
