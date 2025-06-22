@@ -26,6 +26,7 @@ async fn setup_test_config() -> Arc<AppConfig> {
         cloudflare_realtime_app_id: "test_app_id".to_string(),
         cloudflare_realtime_api_token: "test_api_token".to_string(),
         cloudflare_realtime_base_url: "https://test.cloudflare.com".to_string(),
+        redis_url: Some("redis://localhost:6379".to_string()),
     })
 }
 

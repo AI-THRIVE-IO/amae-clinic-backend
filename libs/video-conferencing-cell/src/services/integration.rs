@@ -525,6 +525,7 @@ mod tests {
             cloudflare_realtime_app_id: "test-app-id".to_string(),
             cloudflare_realtime_api_token: "test-token".to_string(),
             cloudflare_realtime_base_url: "https://test.cloudflare.com/v1".to_string(),
+            redis_url: Some("redis://localhost:6379".to_string()),
         }
     }
 

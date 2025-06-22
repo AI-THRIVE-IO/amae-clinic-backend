@@ -380,6 +380,15 @@ async fn test_create_doctor_success() {
         max_daily_appointments: Some(8),
         available_days: Some(vec![1, 2, 3, 4, 5]),
         date_of_birth: chrono::NaiveDate::from_ymd_opt(1980, 1, 1).unwrap(),
+        user_id: Some("test_user_id".to_string()),
+        phone: Some("+1234567890".to_string()),
+        education: Some("Harvard Medical School".to_string()),
+        certifications: Some(vec!["Board Certified Cardiologist".to_string()]),
+        languages: Some(vec!["English".to_string(), "Spanish".to_string()]),
+        consultation_fee: Some(200.0),
+        emergency_fee: Some(400.0),
+        is_available: Some(true),
+        accepts_insurance: Some(true),
     };
 
     // Mock email check - return empty array (no existing doctor)
@@ -449,6 +458,15 @@ async fn test_create_doctor_unauthorized() {
         max_daily_appointments: None,
         available_days: None,
         date_of_birth: chrono::NaiveDate::from_ymd_opt(1980, 1, 1).unwrap(),
+        user_id: None,
+        phone: None,
+        education: None,
+        certifications: None,
+        languages: None,
+        consultation_fee: None,
+        emergency_fee: None,
+        is_available: None,
+        accepts_insurance: None,
     };
 
     let result = create_doctor(

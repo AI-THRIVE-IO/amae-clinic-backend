@@ -85,7 +85,7 @@ impl RedisTestUtils {
             notes: Some("Patient reports chest discomfort".to_string()),
         };
         
-        BookingJob::new(patient_id, request)
+        BookingJob::new(patient_id, request, "test-auth-token".to_string())
     }
     
     /// Wait for job status change with timeout
