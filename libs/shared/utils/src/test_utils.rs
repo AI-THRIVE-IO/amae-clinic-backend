@@ -43,6 +43,7 @@ impl TestConfig {
     }
 }
 
+#[derive(Clone)]
 pub struct TestUser {
     pub id: String,
     pub email: String,
