@@ -89,6 +89,15 @@ impl VideoSessionService {
             _ => (user.id.parse().unwrap_or(patient_id), crate::models::ParticipantType::Patient),
         };
 
+        // Generate unique Cloudflare session ID per participant to avoid constraint conflicts
+        let unique_cloudflare_session_id = format!(
+            "{}_{}_{}_{}", 
+            room_id.chars().take(8).collect::<String>(),
+            participant_id.to_string().chars().take(8).collect::<String>(),
+            format!("{:?}", participant_type).to_lowercase(),
+            Utc::now().timestamp()
+        );
+
         // Create enhanced video session record with room support
         let session_id = Uuid::new_v4();
         let video_session = VideoSession {
@@ -104,8 +113,17 @@ impl VideoSessionService {
             patient_id: Some(patient_id),
             doctor_id: Some(doctor_id),
             
-            // Session management
-            cloudflare_session_id: None, // Will be set when participant joins
+            // Enhanced Cloudflare session management (pre-generated for constraint compliance)
+            cloudflare_session_id: Some(unique_cloudflare_session_id),
+            
+            // Track fields (initially None until tracks are added)
+            cloudflare_track_id: None,
+            track_type: None,
+            media_type: None,
+            track_metadata: None,
+            connection_state: Some(crate::models::ConnectionState::Connecting),
+            
+            // Session lifecycle
             status: VideoSessionStatus::Scheduled,
             session_type: request.session_type,
             scheduled_start_time: request.scheduled_start_time,
@@ -171,31 +189,38 @@ impl VideoSessionService {
             });
         }
 
-        // Create or get Cloudflare session
+        // Enhanced Cloudflare session management with pre-generated IDs
         let cloudflare_session_id = if let Some(cf_session_id) = &session.cloudflare_session_id {
+            // Session ID already exists - this is the normal case now
             cf_session_id.clone()
         } else {
-            // First participant - create Cloudflare session
-            if let Some(session_desc) = &request.session_description {
-                let cf_response = self
-                    .cloudflare
-                    .create_session(session_desc.sdp.clone())
-                    .await?;
-
-                // Update session with Cloudflare session ID
-                session.cloudflare_session_id = Some(cf_response.session_id.clone());
-                session.status = VideoSessionStatus::Ready;
-                session.updated_at = Utc::now();
-
-                self.update_session_record(&session, auth_token).await?;
-
-                cf_response.session_id
-            } else {
-                return Err(VideoConferencingError::WebRTCError {
-                    message: "Session description required for first participant".to_string(),
-                });
-            }
+            // Fallback: generate session ID if somehow missing (should be rare)
+            let fallback_session_id = format!(
+                "{}_{}_{}_{}", 
+                session.room_id.chars().take(8).collect::<String>(),
+                session.participant_id.to_string().chars().take(8).collect::<String>(),
+                format!("{:?}", session.participant_type).to_lowercase(),
+                Utc::now().timestamp()
+            );
+            
+            session.cloudflare_session_id = Some(fallback_session_id.clone());
+            fallback_session_id
         };
+        
+        // Initialize Cloudflare session if session description provided
+        if let Some(session_desc) = &request.session_description {
+            let cf_response = self
+                .cloudflare
+                .create_session(session_desc.sdp.clone())
+                .await?;
+
+            // Update session state
+            session.status = VideoSessionStatus::Ready;
+            session.connection_state = Some(crate::models::ConnectionState::Connected);
+            session.updated_at = Utc::now();
+
+            self.update_session_record(&session, auth_token).await?;
+        }
 
         // Record participant joining
         self.record_participant_join(&session, user, &request.user_type, auth_token)
@@ -500,6 +525,15 @@ impl VideoSessionService {
             
             // Session management
             "cloudflare_session_id": session.cloudflare_session_id,
+            
+            // Enhanced Cloudflare track fields
+            "cloudflare_track_id": session.cloudflare_track_id,
+            "track_type": session.track_type,
+            "media_type": session.media_type,
+            "track_metadata": session.track_metadata,
+            "connection_state": session.connection_state,
+            
+            // Session lifecycle
             "status": session.status,
             "session_type": session.session_type,
             "scheduled_start_time": session.scheduled_start_time,
@@ -564,9 +598,9 @@ impl VideoSessionService {
                 })
                 .map(|s| s.to_string())
         } else {
-            // Create new room directly via INSERT
+            // Create new room with improved ID generation for constraint compliance
             let room_id = format!("room_{}_{}", 
-                appointment_id.to_string().chars().take(8).collect::<String>(),
+                appointment_id.to_string().replace("-", "").chars().take(8).collect::<String>(),
                 chrono::Utc::now().timestamp()
             );
             
@@ -653,6 +687,11 @@ impl VideoSessionService {
         let path = format!("/rest/v1/video_sessions?id=eq.{}", session.id);
         let body = json!({
             "cloudflare_session_id": session.cloudflare_session_id,
+            "cloudflare_track_id": session.cloudflare_track_id,
+            "track_type": session.track_type,
+            "media_type": session.media_type,
+            "track_metadata": session.track_metadata,
+            "connection_state": session.connection_state,
             "status": session.status,
             "actual_start_time": session.actual_start_time,
             "actual_end_time": session.actual_end_time,

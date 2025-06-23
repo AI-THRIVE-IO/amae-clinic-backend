@@ -28,6 +28,24 @@ pub struct VideoSession {
     
     // WebRTC and session management
     pub cloudflare_session_id: Option<String>, // Per-participant WebRTC session
+    
+    // Enhanced Cloudflare Realtime track support
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cloudflare_track_id: Option<String>,
+    
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub track_type: Option<TrackType>,
+    
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub media_type: Option<MediaType>,
+    
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub track_metadata: Option<serde_json::Value>,
+    
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connection_state: Option<ConnectionState>,
+    
+    // Session lifecycle
     pub status: VideoSessionStatus,
     pub session_type: VideoSessionType,
     pub scheduled_start_time: DateTime<Utc>,
@@ -120,6 +138,94 @@ pub enum ConnectionQuality {
     Fair,
     #[serde(rename = "poor")]
     Poor,
+}
+
+/// Cloudflare Realtime track types
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum TrackType {
+    #[serde(rename = "send")]
+    Send,              // Publishing local media (microphone, camera)
+    #[serde(rename = "receive")]
+    Receive,           // Subscribing to remote media
+    #[serde(rename = "bidirectional")]
+    Bidirectional,     // Both send and receive
+}
+
+/// Media stream types
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum MediaType {
+    #[serde(rename = "audio")]
+    Audio,
+    #[serde(rename = "video")]
+    Video,
+    #[serde(rename = "screen")]
+    Screen,            // Screen sharing
+    #[serde(rename = "application")]
+    Application,       // Application sharing
+    #[serde(rename = "data")]
+    Data,              // Data channels
+}
+
+/// WebRTC connection states
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ConnectionState {
+    #[serde(rename = "connecting")]
+    Connecting,
+    #[serde(rename = "connected")]
+    Connected,
+    #[serde(rename = "disconnected")]
+    Disconnected,
+    #[serde(rename = "failed")]
+    Failed,
+    #[serde(rename = "closed")]
+    Closed,
+}
+
+/// Dedicated Cloudflare track record - aligned with database schema
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CloudflareTrack {
+    pub id: Uuid,
+    pub session_id: Uuid,                  // References video_sessions.id
+    pub cloudflare_track_id: String,       // Cloudflare's track identifier
+    pub cloudflare_session_id: String,     // Cloudflare's session identifier
+    
+    // Track properties
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub track_name: Option<String>,
+    pub track_type: TrackType,
+    pub media_type: MediaType,
+    
+    // Media settings
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub codec: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bitrate_kbps: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<String>,         // e.g., "1920x1080"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frame_rate: Option<i32>,
+    
+    // State management
+    pub track_state: TrackState,
+    
+    // Metadata and timing
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub track_metadata: Option<serde_json::Value>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Track state management
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum TrackState {
+    #[serde(rename = "active")]
+    Active,
+    #[serde(rename = "inactive")]
+    Inactive,
+    #[serde(rename = "ended")]
+    Ended,
+    #[serde(rename = "failed")]
+    Failed,
 }
 
 // ==============================================================================

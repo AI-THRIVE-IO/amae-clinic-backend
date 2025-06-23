@@ -45,9 +45,14 @@ mod tests {
             allergies: None,
             chronic_conditions: None,
             medications: None,
+            medical_history: None,
             is_pregnant: None,
             is_breastfeeding: None,
             reproductive_stage: None,
+            gender: None,
+            date_of_birth: None,
+            emergency_contact_name: None,
+            emergency_contact_phone: None,
         };
     }
 }
