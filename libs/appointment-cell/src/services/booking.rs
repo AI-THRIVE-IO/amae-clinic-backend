@@ -1627,7 +1627,7 @@ impl AppointmentBookingService {
             "doctor_id": doctor_id,
             "appointment_date": request.appointment_date.to_rfc3339(),
             "status": "pending",
-            "appointment_type": "GeneralConsultation",
+            "appointment_type": "general_consultation",
             "duration_minutes": 30
         });
 
