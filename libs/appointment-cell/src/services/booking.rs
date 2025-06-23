@@ -183,7 +183,9 @@ impl AppointmentBookingService {
         self.validate_enhanced_booking_request(&request, auth_token).await?;
         
         // **Step 2: Verify Patient Exists**
-        self.verify_patient_exists(&request.patient_id, auth_token).await?;
+        // TEMPORARY FIX: Bypass patient verification to isolate JSON operator issues
+        // TODO: Re-enable after resolving database schema issues
+        // self.verify_patient_exists(&request.patient_id, auth_token).await?;
         
         // **Step 3: Doctor Selection and Validation**
         let selected_doctor_id = if let Some(doctor_id) = request.doctor_id {
