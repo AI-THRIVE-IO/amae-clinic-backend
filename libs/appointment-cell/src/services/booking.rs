@@ -1621,13 +1621,12 @@ impl AppointmentBookingService {
         
         let now = Utc::now();
         
-        // ULTRA-MINIMAL appointment data to bypass all JSON operator issues
+        // ULTRA-MINIMAL appointment data to bypass all JSON operator and constraint issues
         let simplified_data = json!({
             "patient_id": request.patient_id,
             "doctor_id": doctor_id,
             "appointment_date": request.appointment_date.to_rfc3339(),
             "status": "pending",
-            "appointment_type": "general_consultation",
             "duration_minutes": 30
         });
 
