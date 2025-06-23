@@ -7,6 +7,8 @@ use axum::{
 use axum_extra::TypedHeader;
 use headers::{Authorization, authorization::Bearer};
 use serde_json::{json, Value};
+use reqwest::Method;
+use shared_database::supabase::SupabaseClient;
 
 use shared_config::AppConfig;
 use shared_models::auth::User;
@@ -33,19 +35,27 @@ pub async fn get_health_profile(
     // Get token from TypedHeader
     let token = auth.token();
     
-    // Check authorization - only allow users to access their own profile
-    if id != user.id {
+    // Create supabase client for authorization check
+    let supabase = SupabaseClient::new(&state);
+    
+    // Verify the health profile exists AND belongs to this user
+    let auth_query = format!("/rest/v1/health_profiles?id=eq.{}&patient_id=eq.{}", id, user.id);
+    let auth_result: Vec<Value> = supabase.request(
+        Method::GET,
+        &auth_query,
+        Some(token),
+        None,
+    ).await.map_err(|e| AppError::Internal(format!("Authorization check failed: {}", e)))?;
+    
+    if auth_result.is_empty() {
         return Err(AppError::Auth("Not authorized to access this health profile".to_string()));
     }
     
-    // Create profile service
-    let profile_service = HealthProfileService::new(&state);
+    // Convert the first result to HealthProfile and return it
+    let profile: crate::models::HealthProfile = serde_json::from_value(auth_result[0].clone())
+        .map_err(|e| AppError::Internal(format!("Failed to parse health profile: {}", e)))?;
     
-    // Get health profile
-    match profile_service.get_profile(&id, token).await {
-        Ok(profile) => Ok(Json(json!(profile))),
-        Err(_) => Err(AppError::NotFound("Health profile not found".to_string())),
-    }
+    Ok(Json(json!(profile)))
 }
 
 #[axum::debug_handler]
@@ -56,14 +66,31 @@ pub async fn update_health_profile(
     TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
     Json(update_data): Json<UpdateHealthProfile>,
 ) -> Result<Json<Value>, AppError> {
+    use shared_database::supabase::SupabaseClient;
+    use reqwest::Method;
+    
     let token = auth.token();
-    if id != user.id {
+    
+    // Create supabase client for authorization check
+    let supabase = SupabaseClient::new(&state);
+    
+    // Verify the health profile exists AND belongs to this user
+    let auth_query = format!("/rest/v1/health_profiles?id=eq.{}&patient_id=eq.{}", id, user.id);
+    let auth_result: Vec<Value> = supabase.request(
+        Method::GET,
+        &auth_query,
+        Some(token),
+        None,
+    ).await.map_err(|e| AppError::Internal(format!("Authorization check failed: {}", e)))?;
+    
+    if auth_result.is_empty() {
         return Err(AppError::Auth("Not authorized to update this health profile".to_string()));
     }
+    // Parse the existing profile from authorization check result
+    let current_profile: crate::models::HealthProfile = serde_json::from_value(auth_result[0].clone())
+        .map_err(|e| AppError::Internal(format!("Failed to parse health profile: {}", e)))?;
+        
     let profile_service = HealthProfileService::new(&state);
-
-    let current_profile = profile_service.get_profile(&id, token).await
-        .map_err(|_| AppError::NotFound("Health profile not found".to_string()))?;
 
     // For now, bypass patient validation due to permissions issue
     // Assume female if any reproductive fields are being updated
@@ -156,8 +183,19 @@ pub async fn delete_health_profile(
     // Get token from TypedHeader
     let token = auth.token();
     
-    // Check authorization
-    if id != user.id {
+    // Create supabase client for authorization check
+    let supabase = SupabaseClient::new(&state);
+    
+    // Verify the health profile exists AND belongs to this user
+    let auth_query = format!("/rest/v1/health_profiles?id=eq.{}&patient_id=eq.{}", id, user.id);
+    let auth_result: Vec<Value> = supabase.request(
+        Method::GET,
+        &auth_query,
+        Some(token),
+        None,
+    ).await.map_err(|e| AppError::Internal(format!("Authorization check failed: {}", e)))?;
+    
+    if auth_result.is_empty() {
         return Err(AppError::Auth("Not authorized to delete this health profile".to_string()));
     }
     
@@ -184,8 +222,19 @@ pub async fn upload_avatar(
     // Get token from TypedHeader
     let token = auth.token();
     
-    // Check authorization
-    if id != user.id {
+    // Create supabase client for authorization check
+    let supabase = SupabaseClient::new(&state);
+    
+    // Verify the health profile exists AND belongs to this user
+    let auth_query = format!("/rest/v1/health_profiles?id=eq.{}&patient_id=eq.{}", id, user.id);
+    let auth_result: Vec<Value> = supabase.request(
+        Method::GET,
+        &auth_query,
+        Some(token),
+        None,
+    ).await.map_err(|e| AppError::Internal(format!("Authorization check failed: {}", e)))?;
+    
+    if auth_result.is_empty() {
         return Err(AppError::Auth("Not authorized to upload avatar for this profile".to_string()));
     }
     
@@ -209,8 +258,19 @@ pub async fn remove_avatar(
     // Get token from TypedHeader
     let token = auth.token();
     
-    // Check authorization
-    if id != user.id {
+    // Create supabase client for authorization check
+    let supabase = SupabaseClient::new(&state);
+    
+    // Verify the health profile exists AND belongs to this user
+    let auth_query = format!("/rest/v1/health_profiles?id=eq.{}&patient_id=eq.{}", id, user.id);
+    let auth_result: Vec<Value> = supabase.request(
+        Method::GET,
+        &auth_query,
+        Some(token),
+        None,
+    ).await.map_err(|e| AppError::Internal(format!("Authorization check failed: {}", e)))?;
+    
+    if auth_result.is_empty() {
         return Err(AppError::Auth("Not authorized to remove avatar for this profile".to_string()));
     }
     
@@ -237,8 +297,19 @@ pub async fn upload_document(
     // Get token from TypedHeader
     let token = auth.token();
     
-    // Check authorization
-    if id != user.id {
+    // Create supabase client for authorization check
+    let supabase = SupabaseClient::new(&state);
+    
+    // Verify the health profile exists AND belongs to this user
+    let auth_query = format!("/rest/v1/health_profiles?id=eq.{}&patient_id=eq.{}", id, user.id);
+    let auth_result: Vec<Value> = supabase.request(
+        Method::GET,
+        &auth_query,
+        Some(token),
+        None,
+    ).await.map_err(|e| AppError::Internal(format!("Authorization check failed: {}", e)))?;
+    
+    if auth_result.is_empty() {
         return Err(AppError::Auth("Not authorized to upload documents for this profile".to_string()));
     }
     
@@ -267,8 +338,19 @@ pub async fn get_documents(
     // Get token from TypedHeader
     let token = auth.token();
     
-    // Check authorization
-    if id != user.id {
+    // Create supabase client for authorization check
+    let supabase = SupabaseClient::new(&state);
+    
+    // Verify the health profile exists AND belongs to this user
+    let auth_query = format!("/rest/v1/health_profiles?id=eq.{}&patient_id=eq.{}", id, user.id);
+    let auth_result: Vec<Value> = supabase.request(
+        Method::GET,
+        &auth_query,
+        Some(token),
+        None,
+    ).await.map_err(|e| AppError::Internal(format!("Authorization check failed: {}", e)))?;
+    
+    if auth_result.is_empty() {
         return Err(AppError::Auth("Not authorized to access documents for this profile".to_string()));
     }
     
@@ -293,8 +375,19 @@ pub async fn get_document(
     // Get token from TypedHeader
     let token = auth.token();
     
-    // Check authorization
-    if id != user.id {
+    // Create supabase client for authorization check
+    let supabase = SupabaseClient::new(&state);
+    
+    // Verify the health profile exists AND belongs to this user
+    let auth_query = format!("/rest/v1/health_profiles?id=eq.{}&patient_id=eq.{}", id, user.id);
+    let auth_result: Vec<Value> = supabase.request(
+        Method::GET,
+        &auth_query,
+        Some(token),
+        None,
+    ).await.map_err(|e| AppError::Internal(format!("Authorization check failed: {}", e)))?;
+    
+    if auth_result.is_empty() {
         return Err(AppError::Auth("Not authorized to access this document".to_string()));
     }
     
@@ -323,8 +416,19 @@ pub async fn delete_document(
     // Get token from TypedHeader
     let token = auth.token();
     
-    // Check authorization
-    if id != user.id {
+    // Create supabase client for authorization check
+    let supabase = SupabaseClient::new(&state);
+    
+    // Verify the health profile exists AND belongs to this user
+    let auth_query = format!("/rest/v1/health_profiles?id=eq.{}&patient_id=eq.{}", id, user.id);
+    let auth_result: Vec<Value> = supabase.request(
+        Method::GET,
+        &auth_query,
+        Some(token),
+        None,
+    ).await.map_err(|e| AppError::Internal(format!("Authorization check failed: {}", e)))?;
+    
+    if auth_result.is_empty() {
         return Err(AppError::Auth("Not authorized to delete this document".to_string()));
     }
     
@@ -359,8 +463,19 @@ pub async fn generate_nutrition_plan(
     // Get token from TypedHeader
     let token = auth.token();
     
-    // Check authorization
-    if id != user.id {
+    // Create supabase client for authorization check
+    let supabase = SupabaseClient::new(&state);
+    
+    // Verify the health profile exists AND belongs to this user
+    let auth_query = format!("/rest/v1/health_profiles?id=eq.{}&patient_id=eq.{}", id, user.id);
+    let auth_result: Vec<Value> = supabase.request(
+        Method::GET,
+        &auth_query,
+        Some(token),
+        None,
+    ).await.map_err(|e| AppError::Internal(format!("Authorization check failed: {}", e)))?;
+    
+    if auth_result.is_empty() {
         return Err(AppError::Auth("Not authorized to generate nutrition plan for this profile".to_string()));
     }
     
@@ -386,8 +501,19 @@ pub async fn generate_care_plan(
     // Get token from TypedHeader
     let token = auth.token();
     
-    // Check authorization
-    if id != user.id {
+    // Create supabase client for authorization check
+    let supabase = SupabaseClient::new(&state);
+    
+    // Verify the health profile exists AND belongs to this user
+    let auth_query = format!("/rest/v1/health_profiles?id=eq.{}&patient_id=eq.{}", id, user.id);
+    let auth_result: Vec<Value> = supabase.request(
+        Method::GET,
+        &auth_query,
+        Some(token),
+        None,
+    ).await.map_err(|e| AppError::Internal(format!("Authorization check failed: {}", e)))?;
+    
+    if auth_result.is_empty() {
         return Err(AppError::Auth("Not authorized to generate care plan for this profile".to_string()));
     }
     
