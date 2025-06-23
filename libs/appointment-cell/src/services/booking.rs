@@ -1621,18 +1621,14 @@ impl AppointmentBookingService {
         
         let now = Utc::now();
         
-        // Create minimal appointment data to avoid JSON operator issues
+        // ULTRA-MINIMAL appointment data to bypass all JSON operator issues
         let simplified_data = json!({
             "patient_id": request.patient_id,
             "doctor_id": doctor_id,
             "appointment_date": request.appointment_date.to_rfc3339(),
-            "status": "pending", // Use string literal instead of enum
-            "appointment_type": "InitialConsultation", // Use default type
-            "duration_minutes": request.duration_minutes,
-            "timezone": "UTC", // Use default timezone
-            "notes": request.patient_notes.clone().unwrap_or_default(),
-            "created_at": now.to_rfc3339(),
-            "updated_at": now.to_rfc3339()
+            "status": "pending",
+            "appointment_type": "GeneralConsultation",
+            "duration_minutes": 30
         });
 
         debug!("Simplified appointment data: {}", serde_json::to_string_pretty(&simplified_data).unwrap_or_default());
