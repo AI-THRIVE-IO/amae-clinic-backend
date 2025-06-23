@@ -512,9 +512,10 @@ impl VideoSessionService {
             "updated_at": session.updated_at,
         });
 
-        let _: Vec<Value> = self
+        // Handle Supabase POST response - it may return empty or different format
+        let _result = self
             .supabase
-            .request(Method::POST, path, Some(auth_token), Some(body))
+            .request::<serde_json::Value>(Method::POST, path, Some(auth_token), Some(body))
             .await
             .map_err(|e| VideoConferencingError::DatabaseError {
                 message: format!("Failed to store video session: {}", e),
@@ -577,9 +578,10 @@ impl VideoSessionService {
                 "end_to_end_encryption": true
             });
             
-            let _: Vec<serde_json::Value> = self
+            // Handle Supabase POST response for room creation
+            let _result = self
                 .supabase
-                .request(Method::POST, create_path, Some(auth_token), Some(create_body))
+                .request::<serde_json::Value>(Method::POST, create_path, Some(auth_token), Some(create_body))
                 .await
                 .map_err(|e| VideoConferencingError::DatabaseError {
                     message: format!("Failed to create room: {}", e),
@@ -658,9 +660,10 @@ impl VideoSessionService {
             "video_enabled": true,
         });
 
-        let _: Vec<Value> = self
+        // Handle Supabase POST response for participant tracking
+        let _result = self
             .supabase
-            .request(Method::POST, path, Some(auth_token), Some(body))
+            .request::<serde_json::Value>(Method::POST, path, Some(auth_token), Some(body))
             .await
             .map_err(|e| VideoConferencingError::DatabaseError {
                 message: e.to_string(),
