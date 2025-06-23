@@ -74,12 +74,11 @@ impl VideoSessionService {
                 message: "Invalid doctor ID in appointment".to_string(),
             })?;
 
-        // Ensure room exists for this appointment
-        let room_id = self.ensure_room_exists(
-            request.appointment_id,
-            &request.session_type,
-            auth_token,
-        ).await?;
+        // Generate room_id for this appointment (hotfix: bypass room creation) | TODO: FIX FOR PRODUCTION!
+        let room_id = format!("room_{}_{}", 
+            request.appointment_id.to_string().chars().take(8).collect::<String>(),
+            chrono::Utc::now().timestamp()
+        );
         
         // Determine participant details based on user role
         let (participant_id, participant_type) = match user.role.as_deref() {
