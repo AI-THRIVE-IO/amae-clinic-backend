@@ -82,6 +82,10 @@ async fn test_create_video_session_unauthorized() {
                 .header("content-type", "application/json")
                 .body(Body::from(json!({
                     "appointment_id": "12345678-1234-1234-1234-123456789012",
+                    "room_id": null,
+                    "room_type": "consultation",
+                    "max_participants": 4,
+                    "participant_type": "patient",
                     "session_type": "consultation",
                     "scheduled_start_time": "2024-12-25T10:00:00Z"
                 }).to_string()))

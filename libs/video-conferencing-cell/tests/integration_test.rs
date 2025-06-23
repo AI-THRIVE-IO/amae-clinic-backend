@@ -5,7 +5,7 @@ use wiremock::matchers::{method, path};
 
 use shared_utils::test_utils::{TestConfig, TestUser, JwtTestUtils};
 use video_conferencing_cell::{
-    models::{VideoSessionType, CreateVideoSessionRequest},
+    models::{VideoSessionType, CreateVideoSessionRequest, ParticipantType},
     services::{VideoConferencingIntegrationService, CloudflareRealtimeClient},
 };
 
@@ -106,6 +106,10 @@ async fn test_create_session_request_validation() {
     
     let request = CreateVideoSessionRequest {
         appointment_id,
+        room_id: None,
+        room_type: Some(VideoSessionType::Consultation),
+        max_participants: Some(4),
+        participant_type: ParticipantType::Patient,
         session_type: VideoSessionType::Consultation,
         scheduled_start_time: scheduled_time,
     };
@@ -116,4 +120,218 @@ async fn test_create_session_request_validation() {
     
     assert_eq!(request.appointment_id, deserialized.appointment_id);
     assert_eq!(request.session_type, deserialized.session_type);
+    assert_eq!(request.participant_type, deserialized.participant_type);
+    assert_eq!(request.max_participants, deserialized.max_participants);
+}
+
+// ==============================================================================
+// ROOM-BASED ARCHITECTURE TESTS
+// ==============================================================================
+
+#[tokio::test]
+async fn test_participant_type_serialization() {
+    use video_conferencing_cell::models::ParticipantType;
+    
+    let patient = ParticipantType::Patient;
+    let doctor = ParticipantType::Doctor;
+    let specialist = ParticipantType::Specialist;
+    let nurse = ParticipantType::Nurse;
+    let guardian = ParticipantType::Guardian;
+    let therapist = ParticipantType::Therapist;
+    let coordinator = ParticipantType::Coordinator;
+    let interpreter = ParticipantType::Interpreter;
+    let observer = ParticipantType::Observer;
+    
+    // Test serialization
+    assert_eq!(serde_json::to_string(&patient).unwrap(), "\"patient\"");
+    assert_eq!(serde_json::to_string(&doctor).unwrap(), "\"doctor\"");
+    assert_eq!(serde_json::to_string(&specialist).unwrap(), "\"specialist\"");
+    assert_eq!(serde_json::to_string(&nurse).unwrap(), "\"nurse\"");
+    assert_eq!(serde_json::to_string(&guardian).unwrap(), "\"guardian\"");
+    assert_eq!(serde_json::to_string(&therapist).unwrap(), "\"therapist\"");
+    assert_eq!(serde_json::to_string(&coordinator).unwrap(), "\"coordinator\"");
+    assert_eq!(serde_json::to_string(&interpreter).unwrap(), "\"interpreter\"");
+    assert_eq!(serde_json::to_string(&observer).unwrap(), "\"observer\"");
+    
+    // Test deserialization
+    assert_eq!(serde_json::from_str::<ParticipantType>("\"patient\"").unwrap(), patient);
+    assert_eq!(serde_json::from_str::<ParticipantType>("\"doctor\"").unwrap(), doctor);
+    assert_eq!(serde_json::from_str::<ParticipantType>("\"specialist\"").unwrap(), specialist);
+}
+
+#[tokio::test]
+async fn test_enhanced_session_types() {
+    use video_conferencing_cell::models::VideoSessionType;
+    
+    let specialist_consult = VideoSessionType::SpecialistConsult;
+    let group_therapy = VideoSessionType::GroupTherapy;
+    let family_consult = VideoSessionType::FamilyConsult;
+    let team_meeting = VideoSessionType::TeamMeeting;
+    
+    // Test serialization
+    assert_eq!(serde_json::to_string(&specialist_consult).unwrap(), "\"specialist_consult\"");
+    assert_eq!(serde_json::to_string(&group_therapy).unwrap(), "\"group_therapy\"");
+    assert_eq!(serde_json::to_string(&family_consult).unwrap(), "\"family_consult\"");
+    assert_eq!(serde_json::to_string(&team_meeting).unwrap(), "\"team_meeting\"");
+    
+    // Test deserialization
+    assert_eq!(serde_json::from_str::<VideoSessionType>("\"specialist_consult\"").unwrap(), specialist_consult);
+    assert_eq!(serde_json::from_str::<VideoSessionType>("\"group_therapy\"").unwrap(), group_therapy);
+    assert_eq!(serde_json::from_str::<VideoSessionType>("\"family_consult\"").unwrap(), family_consult);
+    assert_eq!(serde_json::from_str::<VideoSessionType>("\"team_meeting\"").unwrap(), team_meeting);
+}
+
+#[tokio::test]
+async fn test_room_based_session_request() {
+    use video_conferencing_cell::models::{CreateVideoSessionRequest, VideoSessionType, ParticipantType};
+    
+    let appointment_id = Uuid::new_v4();
+    let scheduled_time = chrono::Utc::now() + chrono::Duration::hours(1);
+    
+    // Test multi-participant session request
+    let specialist_consult_request = CreateVideoSessionRequest {
+        appointment_id,
+        room_id: Some("room_specialist_consult_2025_123".to_string()),
+        room_type: Some(VideoSessionType::SpecialistConsult),
+        max_participants: Some(6), // Patient + Primary Doctor + Specialist + Nurse + Observer + Coordinator
+        participant_type: ParticipantType::Specialist,
+        session_type: VideoSessionType::SpecialistConsult,
+        scheduled_start_time: scheduled_time,
+    };
+    
+    // Verify serialization/deserialization
+    let json = serde_json::to_string(&specialist_consult_request).unwrap();
+    let deserialized: CreateVideoSessionRequest = serde_json::from_str(&json).unwrap();
+    
+    assert_eq!(specialist_consult_request.appointment_id, deserialized.appointment_id);
+    assert_eq!(specialist_consult_request.room_id, deserialized.room_id);
+    assert_eq!(specialist_consult_request.room_type, deserialized.room_type);
+    assert_eq!(specialist_consult_request.max_participants, deserialized.max_participants);
+    assert_eq!(specialist_consult_request.participant_type, deserialized.participant_type);
+    assert_eq!(specialist_consult_request.session_type, deserialized.session_type);
+    
+    // Test group therapy session
+    let group_therapy_request = CreateVideoSessionRequest {
+        appointment_id,
+        room_id: Some("room_group_therapy_anxiety_2025_456".to_string()),
+        room_type: Some(VideoSessionType::GroupTherapy),
+        max_participants: Some(12), // 1 Therapist + up to 11 Patients
+        participant_type: ParticipantType::Therapist,
+        session_type: VideoSessionType::GroupTherapy,
+        scheduled_start_time: scheduled_time,
+    };
+    
+    let json = serde_json::to_string(&group_therapy_request).unwrap();
+    let deserialized: CreateVideoSessionRequest = serde_json::from_str(&json).unwrap();
+    
+    assert_eq!(group_therapy_request.max_participants, Some(12));
+    assert_eq!(group_therapy_request.participant_type, ParticipantType::Therapist);
+    assert_eq!(group_therapy_request.session_type, VideoSessionType::GroupTherapy);
+}
+
+#[tokio::test]
+async fn test_room_security_models() {
+    use video_conferencing_cell::models::{
+        RoomSecurityConfig, AdmissionPolicy, RecordingPolicy, 
+        ParticipantPermissions, HIPAALevel, ParticipantType
+    };
+    use std::collections::HashMap;
+    
+    // Test security configuration serialization
+    let mut participant_permissions = HashMap::new();
+    participant_permissions.insert(ParticipantType::Doctor, ParticipantPermissions {
+        can_share_screen: true,
+        can_share_audio: true,
+        can_share_video: true,
+        can_record: true,
+        can_admit_participants: true,
+        can_remove_participants: true,
+        can_end_session: true,
+    });
+    
+    participant_permissions.insert(ParticipantType::Patient, ParticipantPermissions {
+        can_share_screen: false,
+        can_share_audio: true,
+        can_share_video: true,
+        can_record: false,
+        can_admit_participants: false,
+        can_remove_participants: false,
+        can_end_session: false,
+    });
+    
+    let security_config = RoomSecurityConfig {
+        admission_control: AdmissionPolicy::WaitingRoom,
+        recording_permissions: RecordingPolicy::HostOnly,
+        participant_permissions,
+        hipaa_compliance_level: HIPAALevel::Enhanced,
+        end_to_end_encryption: true,
+    };
+    
+    // Test serialization
+    let json = serde_json::to_string(&security_config).unwrap();
+    let deserialized: RoomSecurityConfig = serde_json::from_str(&json).unwrap();
+    
+    assert!(matches!(deserialized.admission_control, AdmissionPolicy::WaitingRoom));
+    assert!(matches!(deserialized.recording_permissions, RecordingPolicy::HostOnly));
+    assert!(matches!(deserialized.hipaa_compliance_level, HIPAALevel::Enhanced));
+    assert!(deserialized.end_to_end_encryption);
+    assert_eq!(deserialized.participant_permissions.len(), 2);
+}
+
+#[tokio::test]
+async fn test_video_room_model() {
+    use video_conferencing_cell::models::{
+        VideoRoom, VideoSessionType, RoomStatus, RoomSecurityConfig, 
+        AdmissionPolicy, RecordingPolicy, HIPAALevel, ParticipantType, ParticipantPermissions
+    };
+    use std::collections::HashMap;
+    use chrono::Utc;
+    
+    let room_id = "room_cardiology_consult_2025_789".to_string();
+    let appointment_id = Uuid::new_v4();
+    
+    let mut participant_permissions = HashMap::new();
+    participant_permissions.insert(ParticipantType::Doctor, ParticipantPermissions {
+        can_share_screen: true,
+        can_share_audio: true,
+        can_share_video: true,
+        can_record: true,
+        can_admit_participants: true,
+        can_remove_participants: true,
+        can_end_session: true,
+    });
+    
+    let security_config = RoomSecurityConfig {
+        admission_control: AdmissionPolicy::WaitingRoom,
+        recording_permissions: RecordingPolicy::HostOnly,
+        participant_permissions,
+        hipaa_compliance_level: HIPAALevel::Maximum,
+        end_to_end_encryption: true,
+    };
+    
+    let video_room = VideoRoom {
+        id: room_id.clone(),
+        appointment_id,
+        room_type: VideoSessionType::SpecialistConsult,
+        max_participants: 6,
+        waiting_room_enabled: true,
+        recording_enabled: false,
+        room_status: RoomStatus::Scheduled,
+        security_config,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    };
+    
+    // Test serialization
+    let json = serde_json::to_string(&video_room).unwrap();
+    let deserialized: VideoRoom = serde_json::from_str(&json).unwrap();
+    
+    assert_eq!(deserialized.id, room_id);
+    assert_eq!(deserialized.appointment_id, appointment_id);
+    assert!(matches!(deserialized.room_type, VideoSessionType::SpecialistConsult));
+    assert_eq!(deserialized.max_participants, 6);
+    assert!(deserialized.waiting_room_enabled);
+    assert!(!deserialized.recording_enabled);
+    assert!(matches!(deserialized.room_status, RoomStatus::Scheduled));
+    assert!(matches!(deserialized.security_config.hipaa_compliance_level, HIPAALevel::Maximum));
 }

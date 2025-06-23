@@ -74,14 +74,38 @@ impl VideoSessionService {
                 message: "Invalid doctor ID in appointment".to_string(),
             })?;
 
-        // Create video session record
+        // Ensure room exists for this appointment
+        let room_id = self.ensure_room_exists(
+            request.appointment_id,
+            &request.session_type,
+            auth_token,
+        ).await?;
+        
+        // Determine participant details based on user role
+        let (participant_id, participant_type) = match user.role.as_deref() {
+            Some("doctor") => (user.id.parse().unwrap_or(doctor_id), crate::models::ParticipantType::Doctor),
+            Some("specialist") => (user.id.parse().unwrap_or(doctor_id), crate::models::ParticipantType::Specialist),
+            Some("nurse") => (user.id.parse().unwrap_or(doctor_id), crate::models::ParticipantType::Nurse),
+            _ => (user.id.parse().unwrap_or(patient_id), crate::models::ParticipantType::Patient),
+        };
+
+        // Create enhanced video session record with room support
         let session_id = Uuid::new_v4();
         let video_session = VideoSession {
             id: session_id,
             appointment_id: request.appointment_id,
-            patient_id,
-            doctor_id,
-            cloudflare_session_id: None, // Will be set when first participant joins
+            
+            // Enhanced room-based architecture
+            room_id: room_id.clone(),
+            participant_id,
+            participant_type,
+            
+            // Legacy fields for backward compatibility
+            patient_id: Some(patient_id),
+            doctor_id: Some(doctor_id),
+            
+            // Session management
+            cloudflare_session_id: None, // Will be set when participant joins
             status: VideoSessionStatus::Scheduled,
             session_type: request.session_type,
             scheduled_start_time: request.scheduled_start_time,
@@ -281,8 +305,15 @@ impl VideoSessionService {
         let mut session = self.get_session(session_id, auth_token).await?;
 
         // Verify user can end session (participant or admin)
-        let can_end = session.patient_id.to_string() == user.id
-            || session.doctor_id.to_string() == user.id
+        let user_uuid = user.id.parse::<uuid::Uuid>().map_err(|_| {
+            VideoConferencingError::ValidationError {
+                message: "Invalid user ID format".to_string(),
+            }
+        })?;
+        
+        let can_end = session.participant_id == user_uuid
+            || session.patient_id.map_or(false, |id| id == user_uuid)
+            || session.doctor_id.map_or(false, |id| id == user_uuid)
             || user.role.as_deref() == Some("admin");
 
         if !can_end {
@@ -327,8 +358,15 @@ impl VideoSessionService {
         let session = self.get_session(session_id, auth_token).await?;
 
         // Verify access
-        let has_access = session.patient_id.to_string() == user.id
-            || session.doctor_id.to_string() == user.id
+        let user_uuid = user.id.parse::<uuid::Uuid>().map_err(|_| {
+            VideoConferencingError::ValidationError {
+                message: "Invalid user ID format".to_string(),
+            }
+        })?;
+        
+        let has_access = session.participant_id == user_uuid
+            || session.patient_id.map_or(false, |id| id == user_uuid)
+            || session.doctor_id.map_or(false, |id| id == user_uuid)
             || user.role.as_deref() == Some("admin");
 
         if !has_access {
@@ -404,22 +442,43 @@ impl VideoSessionService {
         user: &User,
         user_type: &ParticipantType,
     ) -> Result<(), VideoConferencingError> {
+        // Enhanced room-based access verification
+        let user_uuid = user.id.parse::<uuid::Uuid>().map_err(|_| {
+            VideoConferencingError::ValidationError {
+                message: "Invalid user ID format".to_string(),
+            }
+        })?;
+        
+        // Check if user is the participant for this session
+        if session.participant_id == user_uuid {
+            return Ok(());
+        }
+        
+        // Legacy compatibility checks
         match user_type {
             ParticipantType::Patient => {
-                if session.patient_id.to_string() != user.id {
-                    return Err(VideoConferencingError::Unauthorized);
+                if let Some(patient_id) = session.patient_id {
+                    if patient_id == user_uuid {
+                        return Ok(());
+                    }
                 }
             }
-            ParticipantType::Doctor => {
-                if session.doctor_id.to_string() != user.id {
-                    return Err(VideoConferencingError::Unauthorized);
+            ParticipantType::Doctor | ParticipantType::Specialist | ParticipantType::Nurse => {
+                if let Some(doctor_id) = session.doctor_id {
+                    if doctor_id == user_uuid {
+                        return Ok(());
+                    }
                 }
+            }
+            _ => {
+                // Other participant types (Guardian, Therapist, etc.) use participant_id check above
             }
         }
 
-        Ok(())
+        Err(VideoConferencingError::Unauthorized)
     }
 
+    /// Store video session with enhanced room-based architecture
     async fn store_session(
         &self,
         session: &VideoSession,
@@ -429,8 +488,17 @@ impl VideoSessionService {
         let body = json!({
             "id": session.id,
             "appointment_id": session.appointment_id,
+            
+            // Enhanced room-based fields
+            "room_id": session.room_id,
+            "participant_id": session.participant_id,
+            "participant_type": session.participant_type,
+            
+            // Legacy fields for backward compatibility
             "patient_id": session.patient_id,
             "doctor_id": session.doctor_id,
+            
+            // Session management
             "cloudflare_session_id": session.cloudflare_session_id,
             "status": session.status,
             "session_type": session.session_type,
@@ -449,10 +517,54 @@ impl VideoSessionService {
             .request(Method::POST, path, Some(auth_token), Some(body))
             .await
             .map_err(|e| VideoConferencingError::DatabaseError {
-                message: e.to_string(),
+                message: format!("Failed to store video session: {}", e),
             })?;
 
         Ok(())
+    }
+    
+    /// Create or get existing room for appointment
+    async fn ensure_room_exists(
+        &self,
+        appointment_id: Uuid,
+        session_type: &crate::models::VideoSessionType,
+        auth_token: &str,
+    ) -> Result<String, VideoConferencingError> {
+        // Check if room already exists for this appointment
+        let check_path = format!("/rest/v1/video_rooms?appointment_id=eq.{}", appointment_id);
+        let existing_rooms: Vec<Value> = self
+            .supabase
+            .request(Method::GET, &check_path, Some(auth_token), None)
+            .await
+            .map_err(|e| VideoConferencingError::DatabaseError {
+                message: format!("Failed to check existing rooms: {}", e),
+            })?;
+            
+        if let Some(room) = existing_rooms.first() {
+            // Room exists, return its ID
+            room["id"].as_str()
+                .ok_or_else(|| VideoConferencingError::DatabaseError {
+                    message: "Room ID not found in database response".to_string(),
+                })
+                .map(|s| s.to_string())
+        } else {
+            // Create new room using database function
+            let create_path = "/rest/v1/rpc/create_default_room_for_appointment";
+            let create_body = json!({
+                "appointment_uuid": appointment_id,
+                "session_type": session_type
+            });
+            
+            let room_id_response: String = self
+                .supabase
+                .request(Method::POST, create_path, Some(auth_token), Some(create_body))
+                .await
+                .map_err(|e| VideoConferencingError::DatabaseError {
+                    message: format!("Failed to create room: {}", e),
+                })?;
+                
+            Ok(room_id_response)
+        }
     }
 
     async fn get_session(

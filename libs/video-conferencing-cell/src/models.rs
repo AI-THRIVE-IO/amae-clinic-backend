@@ -8,13 +8,26 @@ use uuid::Uuid;
 // VIDEO CONFERENCING DOMAIN MODELS
 // ==============================================================================
 
+/// Enhanced VideoSession model with room-based architecture
+/// Supports multi-participant medical consultations and enterprise video conferencing
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VideoSession {
     pub id: Uuid,
     pub appointment_id: Uuid,
-    pub patient_id: Uuid,
-    pub doctor_id: Uuid,
-    pub cloudflare_session_id: Option<String>,
+    
+    // Enhanced room-based architecture
+    pub room_id: String,                    // Logical meeting room identifier
+    pub participant_id: Uuid,               // Individual participant in the room
+    pub participant_type: ParticipantType,  // Role: patient, doctor, specialist, guardian
+    
+    // Legacy fields maintained for compatibility
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub patient_id: Option<Uuid>,           // Deprecated: use participant_id + type
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doctor_id: Option<Uuid>,            // Deprecated: use participant_id + type
+    
+    // WebRTC and session management
+    pub cloudflare_session_id: Option<String>, // Per-participant WebRTC session
     pub status: VideoSessionStatus,
     pub session_type: VideoSessionType,
     pub scheduled_start_time: DateTime<Utc>,
@@ -43,14 +56,23 @@ pub enum VideoSessionStatus {
     Failed,
 }
 
+/// Enhanced video session types for comprehensive medical scenarios
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum VideoSessionType {
     #[serde(rename = "consultation")]
-    Consultation,
+    Consultation,           // Standard 1:1 doctor-patient
     #[serde(rename = "follow_up")]
-    FollowUp,
+    FollowUp,              // Follow-up appointments
     #[serde(rename = "emergency")]
-    Emergency,
+    Emergency,             // Emergency consultations
+    #[serde(rename = "specialist_consult")]
+    SpecialistConsult,     // Multi-doctor specialist consultation
+    #[serde(rename = "group_therapy")]
+    GroupTherapy,          // Group mental health sessions
+    #[serde(rename = "family_consult")]
+    FamilyConsult,         // Patient + family members
+    #[serde(rename = "team_meeting")]
+    TeamMeeting,           // Multidisciplinary team conference
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,12 +87,27 @@ pub struct SessionParticipant {
     pub video_enabled: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Enhanced participant types for comprehensive medical video conferencing
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum ParticipantType {
     #[serde(rename = "patient")]
     Patient,
     #[serde(rename = "doctor")]
     Doctor,
+    #[serde(rename = "specialist")]
+    Specialist,            // Specialist doctors (cardiologist, neurologist, etc.)
+    #[serde(rename = "nurse")]
+    Nurse,                 // Nursing staff
+    #[serde(rename = "guardian")]
+    Guardian,              // Parent/guardian for pediatric patients
+    #[serde(rename = "therapist")]
+    Therapist,             // Mental health professionals
+    #[serde(rename = "coordinator")]
+    Coordinator,           // Medical coordinators/administrators
+    #[serde(rename = "interpreter")]
+    Interpreter,           // Language interpreters
+    #[serde(rename = "observer")]
+    Observer,              // Medical students, observers
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -163,13 +200,106 @@ pub struct CloudflareRenegotiateRequest {
 }
 
 // ==============================================================================
+// ROOM MANAGEMENT MODELS
+// ==============================================================================
+
+/// Video Room - Logical meeting space for medical consultations
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VideoRoom {
+    pub id: String,                          // room_id
+    pub appointment_id: Uuid,
+    pub room_type: VideoSessionType,
+    pub max_participants: i32,
+    pub waiting_room_enabled: bool,
+    pub recording_enabled: bool,
+    pub room_status: RoomStatus,
+    pub security_config: RoomSecurityConfig,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum RoomStatus {
+    #[serde(rename = "scheduled")]
+    Scheduled,
+    #[serde(rename = "waiting")]
+    Waiting,               // Waiting room active, participants can join lobby
+    #[serde(rename = "active")]
+    Active,                // Meeting in progress
+    #[serde(rename = "ended")]
+    Ended,
+    #[serde(rename = "cancelled")]
+    Cancelled,
+}
+
+/// Room security and access control configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoomSecurityConfig {
+    pub admission_control: AdmissionPolicy,
+    pub recording_permissions: RecordingPolicy,
+    pub participant_permissions: HashMap<ParticipantType, ParticipantPermissions>,
+    pub hipaa_compliance_level: HIPAALevel,
+    pub end_to_end_encryption: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AdmissionPolicy {
+    #[serde(rename = "open")]
+    Open,                  // Anyone with room link can join
+    #[serde(rename = "waiting_room")]
+    WaitingRoom,           // Participants wait for host approval
+    #[serde(rename = "restricted")]
+    Restricted,            // Only pre-approved participants
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum RecordingPolicy {
+    #[serde(rename = "disabled")]
+    Disabled,
+    #[serde(rename = "host_only")]
+    HostOnly,              // Only doctors can record
+    #[serde(rename = "all_participants")]
+    AllParticipants,       // Any participant can record
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParticipantPermissions {
+    pub can_share_screen: bool,
+    pub can_share_audio: bool,
+    pub can_share_video: bool,
+    pub can_record: bool,
+    pub can_admit_participants: bool,
+    pub can_remove_participants: bool,
+    pub can_end_session: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum HIPAALevel {
+    #[serde(rename = "standard")]
+    Standard,
+    #[serde(rename = "enhanced")]
+    Enhanced,
+    #[serde(rename = "maximum")]
+    Maximum,
+}
+
+// ==============================================================================
 // API REQUEST/RESPONSE MODELS
 // ==============================================================================
 
+/// Enhanced create video session request with room support
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateVideoSessionRequest {
     #[serde(with = "uuid_serde_flexible")]
     pub appointment_id: Uuid,
+    
+    // Room configuration (optional - will generate if not provided)
+    pub room_id: Option<String>,
+    pub room_type: Option<VideoSessionType>,
+    pub max_participants: Option<i32>,
+    
+    // Participant information
+    pub participant_type: ParticipantType,
     pub session_type: VideoSessionType,
     pub scheduled_start_time: DateTime<Utc>,
 }

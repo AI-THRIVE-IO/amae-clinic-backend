@@ -71,9 +71,24 @@ impl VideoConferencingIntegrationService {
             });
         }
 
-        // Create session request
+        // Create session request with enhanced room support
         let session_request = CreateVideoSessionRequest {
             appointment_id,
+            room_id: None,  // Will be auto-generated
+            room_type: Some(session_type.clone()),
+            max_participants: Some(match session_type {
+                crate::models::VideoSessionType::GroupTherapy => 12,
+                crate::models::VideoSessionType::TeamMeeting => 10,
+                crate::models::VideoSessionType::SpecialistConsult => 6,
+                crate::models::VideoSessionType::FamilyConsult => 8,
+                _ => 4,
+            }),
+            participant_type: match requesting_user.role.as_deref() {
+                Some("doctor") => crate::models::ParticipantType::Doctor,
+                Some("specialist") => crate::models::ParticipantType::Specialist,
+                Some("nurse") => crate::models::ParticipantType::Nurse,
+                _ => crate::models::ParticipantType::Patient,
+            },
             session_type,
             scheduled_start_time: appointment_date,
         };
@@ -312,8 +327,15 @@ impl VideoConferencingIntegrationService {
         let session = self.get_session_by_appointment(appointment_id, auth_token).await?;
 
         // Verify access
-        let has_access = session.patient_id.to_string() == user.id
-            || session.doctor_id.to_string() == user.id
+        let user_uuid = user.id.parse::<uuid::Uuid>().map_err(|_| {
+            VideoConferencingError::ValidationError {
+                message: "Invalid user ID format".to_string(),
+            }
+        })?;
+        
+        let has_access = session.participant_id == user_uuid
+            || session.patient_id.map_or(false, |id| id == user_uuid)
+            || session.doctor_id.map_or(false, |id| id == user_uuid)
             || user.role.as_deref() == Some("admin");
 
         if !has_access {
