@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
+use serde_json;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HealthProfile {
@@ -8,15 +9,31 @@ pub struct HealthProfile {
     pub patient_id: Uuid,
     pub blood_type: Option<String>,
     pub height_cm: Option<i32>,
-    pub weight_kg: Option<i32>,
+    pub weight_kg: Option<f64>,
     pub bmi: Option<f64>,
-    pub allergies: Option<String>,
+    
+    // Handle database field name mappings and type differences
+    #[serde(alias = "allergies")]
+    pub allergies: Option<Vec<String>>,
+    
+    #[serde(alias = "chronic_conditions")]
     pub chronic_conditions: Option<Vec<String>>,
-    pub medications: Option<String>,
+    
+    #[serde(alias = "current_medications")]
+    pub medications: Option<Vec<String>>,
+    
+    #[serde(alias = "medical_history")]
+    pub medical_history: Option<Vec<String>>,
+    
     pub avatar_url: Option<String>,
     pub is_pregnant: Option<bool>,
     pub is_breastfeeding: Option<bool>,
     pub reproductive_stage: Option<String>,
+    pub gender: Option<String>,
+    pub date_of_birth: Option<String>,
+    pub emergency_contact_name: Option<String>,
+    pub emergency_contact_phone: Option<String>,
+    pub ai_health_summary: Option<serde_json::Value>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -25,13 +42,18 @@ pub struct HealthProfile {
 pub struct UpdateHealthProfile {
     pub blood_type: Option<String>,
     pub height_cm: Option<i32>,
-    pub weight_kg: Option<i32>,
-    pub allergies: Option<String>,
+    pub weight_kg: Option<f64>,
+    pub allergies: Option<Vec<String>>,
     pub chronic_conditions: Option<Vec<String>>,
-    pub medications: Option<String>,
+    pub medications: Option<Vec<String>>,
+    pub medical_history: Option<Vec<String>>,
     pub is_pregnant: Option<bool>,
     pub is_breastfeeding: Option<bool>,
     pub reproductive_stage: Option<String>,
+    pub gender: Option<String>,
+    pub date_of_birth: Option<String>,
+    pub emergency_contact_name: Option<String>,
+    pub emergency_contact_phone: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
