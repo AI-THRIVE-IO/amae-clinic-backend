@@ -512,14 +512,29 @@ impl VideoSessionService {
             "updated_at": session.updated_at,
         });
 
-        // Handle Supabase POST response - it may return empty or different format
-        let _result = self
+        // Handle Supabase POST response with improved error handling
+        match self
             .supabase
             .request::<serde_json::Value>(Method::POST, path, Some(auth_token), Some(body))
             .await
-            .map_err(|e| VideoConferencingError::DatabaseError {
-                message: format!("Failed to store video session: {}", e),
-            })?;
+        {
+            Ok(_) => {
+                // Success - video session stored
+            },
+            Err(e) => {
+                let error_msg = e.to_string();
+                // Check if it's a parsing error that might indicate successful creation
+                if error_msg.contains("error decoding response body") || error_msg.contains("EOF while parsing") {
+                    // Likely successful creation with empty response - continue
+                    tracing::warn!("Video session may have been created despite parsing error: {}", error_msg);
+                } else {
+                    // Real error - propagate it
+                    return Err(VideoConferencingError::DatabaseError {
+                        message: format!("Failed to store video session: {}", e),
+                    });
+                }
+            }
+        }
 
         Ok(())
     }
@@ -578,14 +593,29 @@ impl VideoSessionService {
                 "end_to_end_encryption": true
             });
             
-            // Handle Supabase POST response for room creation
-            let _result = self
+            // Handle Supabase POST response for room creation with improved error handling
+            match self
                 .supabase
                 .request::<serde_json::Value>(Method::POST, create_path, Some(auth_token), Some(create_body))
                 .await
-                .map_err(|e| VideoConferencingError::DatabaseError {
-                    message: format!("Failed to create room: {}", e),
-                })?;
+            {
+                Ok(_) => {
+                    // Success - room created
+                },
+                Err(e) => {
+                    let error_msg = e.to_string();
+                    // Check if it's a parsing error that might indicate successful creation
+                    if error_msg.contains("error decoding response body") || error_msg.contains("EOF while parsing") {
+                        // Likely successful creation with empty response - continue
+                        tracing::warn!("Room may have been created despite parsing error: {}", error_msg);
+                    } else {
+                        // Real error - propagate it
+                        return Err(VideoConferencingError::DatabaseError {
+                            message: format!("Failed to create room: {}", e),
+                        });
+                    }
+                }
+            }
                 
             Ok(room_id)
         }
@@ -660,14 +690,29 @@ impl VideoSessionService {
             "video_enabled": true,
         });
 
-        // Handle Supabase POST response for participant tracking
-        let _result = self
+        // Handle Supabase POST response for participant tracking with improved error handling
+        match self
             .supabase
             .request::<serde_json::Value>(Method::POST, path, Some(auth_token), Some(body))
             .await
-            .map_err(|e| VideoConferencingError::DatabaseError {
-                message: e.to_string(),
-            })?;
+        {
+            Ok(_) => {
+                // Success - participant tracked
+            },
+            Err(e) => {
+                let error_msg = e.to_string();
+                // Check if it's a parsing error that might indicate successful creation
+                if error_msg.contains("error decoding response body") || error_msg.contains("EOF while parsing") {
+                    // Likely successful creation with empty response - continue
+                    tracing::warn!("Participant tracking may have succeeded despite parsing error: {}", error_msg);
+                } else {
+                    // Real error - propagate it
+                    return Err(VideoConferencingError::DatabaseError {
+                        message: e.to_string(),
+                    });
+                }
+            }
+        }
 
         Ok(())
     }
