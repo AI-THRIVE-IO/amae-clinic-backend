@@ -74,11 +74,12 @@ impl VideoSessionService {
                 message: "Invalid doctor ID in appointment".to_string(),
             })?;
 
-        // Generate room_id for this appointment (hotfix: bypass room creation) | TODO: FIX FOR PRODUCTION!
-        let room_id = format!("room_{}_{}", 
-            request.appointment_id.to_string().chars().take(8).collect::<String>(),
-            chrono::Utc::now().timestamp()
-        );
+        // Ensure room exists for this appointment
+        let room_id = self.ensure_room_exists(
+            request.appointment_id,
+            &request.session_type,
+            auth_token,
+        ).await?;
         
         // Determine participant details based on user role
         let (participant_id, participant_type) = match user.role.as_deref() {
@@ -547,14 +548,36 @@ impl VideoSessionService {
                 })
                 .map(|s| s.to_string())
         } else {
-            // Create new room using database function
-            let create_path = "/rest/v1/rpc/create_default_room_for_appointment";
+            // Create new room directly via INSERT
+            let room_id = format!("room_{}_{}", 
+                appointment_id.to_string().chars().take(8).collect::<String>(),
+                chrono::Utc::now().timestamp()
+            );
+            
+            let max_participants = match session_type {
+                crate::models::VideoSessionType::GroupTherapy => 12,
+                crate::models::VideoSessionType::TeamMeeting => 10,
+                crate::models::VideoSessionType::SpecialistConsult => 6,
+                crate::models::VideoSessionType::FamilyConsult => 8,
+                _ => 4,
+            };
+            
+            let create_path = "/rest/v1/video_rooms";
             let create_body = json!({
-                "appointment_uuid": appointment_id,
-                "session_type": session_type
+                "id": room_id,
+                "appointment_id": appointment_id,
+                "room_type": session_type,
+                "max_participants": max_participants,
+                "waiting_room_enabled": true,
+                "recording_enabled": false,
+                "room_status": "scheduled",
+                "admission_control": "waiting_room",
+                "recording_policy": "host_only",
+                "hipaa_compliance_level": "standard",
+                "end_to_end_encryption": true
             });
             
-            let room_id_response: String = self
+            let _: Vec<serde_json::Value> = self
                 .supabase
                 .request(Method::POST, create_path, Some(auth_token), Some(create_body))
                 .await
@@ -562,7 +585,7 @@ impl VideoSessionService {
                     message: format!("Failed to create room: {}", e),
                 })?;
                 
-            Ok(room_id_response)
+            Ok(room_id)
         }
     }
 
