@@ -26,6 +26,9 @@ pub enum AppError {
     #[error("Validation error: {0}")]
     ValidationError(String),
 
+    #[error("Conflict: {0}")]
+    Conflict(String),
+
     #[error("External service error: {0}")]
     ExternalService(String),
 }
@@ -39,6 +42,7 @@ impl IntoResponse for AppError {
             AppError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
             AppError::Database(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
             AppError::ValidationError(msg) => (StatusCode::BAD_REQUEST, msg),
+            AppError::Conflict(msg) => (StatusCode::CONFLICT, msg),
             AppError::ExternalService(msg) => (StatusCode::BAD_GATEWAY, msg),
         };
 

@@ -135,7 +135,7 @@ impl HealthProfileService {
                     medical_history: None,
                     is_pregnant,
                     is_breastfeeding,
-                    reproductive_stage,
+                    reproductive_stage: reproductive_stage.clone(),
                     gender: None,
                     date_of_birth: None,
                     emergency_contact_name: None,
