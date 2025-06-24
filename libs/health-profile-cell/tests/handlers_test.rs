@@ -15,8 +15,6 @@ use health_profile_cell::models::{
     CreateHealthProfileRequest,
     UpdateHealthProfile,
     DocumentUpload,
-    AvatarUpload,
-    CarePlanRequest,
 };
 use shared_config::AppConfig;
 use shared_models::auth::User;
@@ -183,13 +181,18 @@ async fn test_update_health_profile_success() {
     let update_request = UpdateHealthProfile {
         blood_type: Some("A+".to_string()),
         height_cm: Some(180),
-        weight_kg: Some(75),
-        allergies: Some("Nuts".to_string()),
+        weight_kg: Some(75.0),
+        allergies: Some(vec!["Nuts".to_string()]),
         chronic_conditions: Some(vec!["Hypertension".to_string()]),
-        medications: Some("Daily vitamin".to_string()),
+        medications: Some(vec!["Daily vitamin".to_string()]),
+        medical_history: Some(vec!["Previous surgery".to_string()]),
         is_pregnant: Some(false),
         is_breastfeeding: Some(false),
         reproductive_stage: Some("reproductive".to_string()),
+        gender: Some("female".to_string()),
+        date_of_birth: Some("1990-05-15".to_string()),
+        emergency_contact_name: Some("John Smith".to_string()),
+        emergency_contact_phone: Some("+353-1-234-5678".to_string()),
     };
 
     let profile_id = Uuid::new_v4();
@@ -283,10 +286,10 @@ async fn test_upload_document_success() {
     config.supabase_url = mock_server.uri();
     
     let patient_user = TestUser::patient("patient@example.com");
-    let token = JwtTestUtils::create_test_token(&patient_user, &config.supabase_jwt_secret, Some(24));
+    let _token = JwtTestUtils::create_test_token(&patient_user, &config.supabase_jwt_secret, Some(24));
     let document_id = Uuid::new_v4();
     
-    let upload_request = DocumentUpload {
+    let _upload_request = DocumentUpload {
         title: "medical_report.pdf".to_string(),
         file_data: "base64encodedfiledata".to_string(),
         file_type: "application/pdf".to_string(),
@@ -334,7 +337,7 @@ async fn test_upload_document_success() {
 #[tokio::test] 
 async fn test_analyze_document_mock() {
     // Mock test for document analysis since the function doesn't exist
-    let patient_user = TestUser::patient("patient@example.com");
+    let _patient_user = TestUser::patient("patient@example.com");
     let document_id = Uuid::new_v4();
     
     let mock_analysis = json!({
@@ -375,7 +378,7 @@ async fn test_get_documents_list() {
     config.supabase_url = mock_server.uri();
     
     let patient_user = TestUser::patient("patient@example.com");
-    let token = JwtTestUtils::create_test_token(&patient_user, &config.supabase_jwt_secret, Some(24));
+    let _token = JwtTestUtils::create_test_token(&patient_user, &config.supabase_jwt_secret, Some(24));
 
     // Mock get documents list
     Mock::given(method("GET"))
@@ -468,7 +471,7 @@ async fn test_doctor_access_to_patient_profile() {
     config.supabase_url = mock_server.uri();
     
     let doctor_user = TestUser::doctor("doctor@example.com");
-    let token = JwtTestUtils::create_test_token(&doctor_user, &config.supabase_jwt_secret, Some(24));
+    let _token = JwtTestUtils::create_test_token(&doctor_user, &config.supabase_jwt_secret, Some(24));
     let patient_id = Uuid::new_v4().to_string();
 
     // Mock doctor accessing patient profile (should be allowed with proper authorization)

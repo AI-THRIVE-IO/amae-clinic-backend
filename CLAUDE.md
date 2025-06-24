@@ -57,8 +57,12 @@ This medical clinic backend uses a **"cell architecture"** where each major feat
 - **health-profile-cell** - Patient health profiles and AI analysis
 - **doctor-cell** - Doctor management, availability, and patient matching
 - **appointment-cell** - Appointment booking with conflict detection and smart booking
-- **patient-cell** - Patient management (planned)
-- **prescription-cell** - Prescription management (planned)
+- **patient-cell** - Patient management and registration
+- **booking-queue-cell** - Async queue management for booking operations with Redis
+- **video-conferencing-cell** - Video session management with Cloudflare integration
+- **security-cell** - Security monitoring, audit logging, and password validation
+- **monitoring-cell** - Health checks, metrics collection, and alerting
+- **performance-cell** - Caching and performance optimization
 
 ### Cell Structure
 Each cell follows this pattern:
@@ -85,6 +89,11 @@ libs/[cell-name]/
 - **JWT Authentication** - Custom HMAC-SHA256 token validation
 - **Row Level Security** - Database-level authorization through JWT claims
 - **File Storage** - Document and image uploads handled by Supabase Storage
+
+### Redis Integration
+- **Queue Management** - Redis-backed async job queues with deadpool connection pooling
+- **Caching** - Performance optimization through Redis caching layer
+- **Real-time Updates** - WebSocket support for live booking updates
 
 ### Authentication Flow
 1. JWT tokens validated using custom HMAC-SHA256 verification
@@ -122,6 +131,12 @@ The main API (`apps/api`) aggregates all cell routers:
 - `/health` → health-profile-cell
 - `/doctors` → doctor-cell
 - `/appointments` → appointment-cell
+- `/patients` → patient-cell
+- `/queue` → booking-queue-cell
+- `/video` → video-conferencing-cell
+- `/security` → security-cell
+- `/monitoring` → monitoring-cell
+- `/performance` → performance-cell
 
 ## Development Notes
 
@@ -185,6 +200,12 @@ cargo test -p auth-cell
 cargo test -p doctor-cell
 cargo test -p appointment-cell
 cargo test -p health-profile-cell
+cargo test -p patient-cell
+cargo test -p booking-queue-cell
+cargo test -p video-conferencing-cell
+cargo test -p security-cell
+cargo test -p monitoring-cell
+cargo test -p performance-cell
 
 # Run tests with output
 cargo test -- --nocapture
@@ -227,9 +248,45 @@ cargo test -j 4
 - Avatar generation
 - Authorization and privacy protection
 
+#### Patient Cell Tests
+- Patient registration and profile management
+- Patient search and filtering
+- Authorization checks for patient data access
+
+#### Booking Queue Cell Tests
+- Redis queue operations (producer/consumer)
+- WebSocket real-time updates
+- Async job processing and retry mechanisms
+- Queue worker lifecycle management
+
+#### Video Conferencing Cell Tests
+- Cloudflare video session integration
+- Session lifecycle management
+- Video room creation and management
+- Video track and stream handling
+
+#### Security Cell Tests
+- Security audit logging
+- Password validation and strength checking
+- Threat monitoring and detection
+- Security event tracking
+
+#### Monitoring Cell Tests
+- Health check endpoints
+- Metrics collection and reporting
+- Alert system functionality
+- System status monitoring
+
+#### Performance Cell Tests
+- Redis caching operations
+- Cache invalidation strategies
+- Performance optimization utilities
+
 ### Mock Strategy
 Tests use **wiremock** to mock external dependencies:
 - Supabase REST API calls
+- Redis operations and queue management
+- Cloudflare video service integration
 - File storage operations
 - AI service integrations
 - Database operations
