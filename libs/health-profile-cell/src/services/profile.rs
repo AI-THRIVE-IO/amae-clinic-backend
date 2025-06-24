@@ -119,11 +119,50 @@ impl HealthProfileService {
     ) -> Result<HealthProfile> {
         debug!("Processing health profile for patient: {}", patient_id);
 
-        // Production-ready approach: create profile with error handling
-        // Validation is handled at the handler level to avoid database operator issues
+        // First, check if a health profile already exists for this patient
+        debug!("Checking for existing health profile for patient: {}", patient_id);
+        match self.get_profile(patient_id, auth_token).await {
+            Ok(existing_profile) => {
+                debug!("Health profile already exists for patient: {}, returning existing profile", patient_id);
+                // Profile already exists, update it with new values if any are provided
+                let update_data = UpdateHealthProfile {
+                    blood_type: None,
+                    height_cm: None,
+                    weight_kg: None,
+                    allergies: None,
+                    chronic_conditions: None,
+                    medications: None,
+                    medical_history: None,
+                    is_pregnant,
+                    is_breastfeeding,
+                    reproductive_stage,
+                    gender: None,
+                    date_of_birth: None,
+                    emergency_contact_name: None,
+                    emergency_contact_phone: None,
+                };
+                
+                // Only update if there are non-None values to update
+                let has_updates = is_pregnant.is_some() || 
+                                is_breastfeeding.is_some() || 
+                                reproductive_stage.is_some();
+                
+                if has_updates {
+                    debug!("Updating existing health profile with new values");
+                    return self.update_profile(&existing_profile.id.to_string(), update_data, auth_token).await;
+                } else {
+                    debug!("No updates provided, returning existing health profile");
+                    return Ok(existing_profile);
+                }
+            }
+            Err(_) => {
+                debug!("No existing health profile found, proceeding with creation");
+                // Profile doesn't exist, continue with creation
+            }
+        }
         
         // Create new health profile with minimal required fields
-        debug!("Creating health profile with minimal required fields");
+        debug!("Creating new health profile with minimal required fields");
         let profile_data = json!({
             "patient_id": patient_id,
             "is_pregnant": is_pregnant.unwrap_or(false),
@@ -136,19 +175,23 @@ impl HealthProfileService {
         let mut headers = HeaderMap::new();
         headers.insert("Prefer", HeaderValue::from_static("return=representation"));
         
-        // Use upsert to handle duplicate key conflicts gracefully
-        headers.insert("Resolution", HeaderValue::from_static("merge-duplicates"));
-        
         let path = "/rest/v1/health_profiles";
         let result: Vec<Value> = self.supabase.request_with_headers(
             Method::POST,
             path,
             Some(auth_token),
-            Some(profile_data),
-            Some(headers),
+            Some(profile_data.clone()),
+            Some(headers.clone()),
         ).await.map_err(|e| {
             debug!("Health profile creation error: {}", e);
-            // If it's a constraint violation, try to get existing profile
+            
+            // If it's a duplicate key constraint violation, try to handle gracefully
+            let error_msg = e.to_string();
+            if error_msg.contains("duplicate key") && error_msg.contains("health_profiles_patient_id_key") {
+                debug!("Duplicate key constraint detected, this might be a race condition");
+                return anyhow!("Health profile already exists for this patient. Use update instead of create.");
+            }
+            
             anyhow!("Failed to create health profile: {}", e)
         })?;
 

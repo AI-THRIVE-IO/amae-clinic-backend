@@ -64,8 +64,14 @@ pub async fn enqueue_smart_booking(
 pub async fn get_job_status(
     State(config): State<Arc<AppConfig>>,
     Extension(user): Extension<User>,
-    Path(job_id): Path<Uuid>,
+    Path(job_id_str): Path<String>,
 ) -> Result<Json<Value>, AppError> {
+    // Parse job_id with better error handling
+    let job_id = Uuid::parse_str(&job_id_str).map_err(|e| {
+        error!("Failed to parse job_id '{}': {}", job_id_str, e);
+        AppError::BadRequest(format!("Invalid job_id format '{}': must be a valid UUID", job_id_str))
+    })?;
+    
     info!("Job status request for job: {} from user: {}", job_id, user.id);
 
     let worker_config = WorkerConfig::default();
@@ -113,8 +119,14 @@ pub async fn get_job_status(
 pub async fn cancel_job(
     State(config): State<Arc<AppConfig>>,
     Extension(user): Extension<User>,
-    Path(job_id): Path<Uuid>,
+    Path(job_id_str): Path<String>,
 ) -> Result<Json<Value>, AppError> {
+    // Parse job_id with better error handling
+    let job_id = Uuid::parse_str(&job_id_str).map_err(|e| {
+        error!("Failed to parse job_id '{}': {}", job_id_str, e);
+        AppError::BadRequest(format!("Invalid job_id format '{}': must be a valid UUID", job_id_str))
+    })?;
+    
     info!("Cancel job request for job: {} from user: {}", job_id, user.id);
 
     let worker_config = WorkerConfig::default();

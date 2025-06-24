@@ -168,7 +168,16 @@ pub async fn create_health_profile(
         payload.is_breastfeeding,
         payload.reproductive_stage.clone(),
     ).await
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+        .map_err(|e| {
+            let error_msg = e.to_string();
+            if error_msg.contains("Health profile already exists") || 
+               error_msg.contains("duplicate key") ||
+               error_msg.contains("health_profiles_patient_id_key") {
+                AppError::Conflict("Health profile already exists for this patient. Use update endpoint instead.".to_string())
+            } else {
+                AppError::Internal(error_msg)
+            }
+        })?;
 
     Ok(Json(json!(new_profile)))
 }
