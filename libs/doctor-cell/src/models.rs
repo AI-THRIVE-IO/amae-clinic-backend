@@ -612,8 +612,12 @@ pub enum AppointmentType {
     #[serde(alias = "initial_consultation", alias = "initial", alias = "new_patient")]
     InitialConsultation,
     
+    // 15-30 minutes, general consultations  
+    #[serde(alias = "general_consultation", alias = "consultation", alias = "general")]
+    GeneralConsultation,
+    
     // 15-30 minutes, existing patients
-    #[serde(alias = "follow_up_consultation", alias = "follow_up", alias = "followup", alias = "general_consultation", alias = "consultation", alias = "general")]
+    #[serde(alias = "follow_up_consultation", alias = "follow_up", alias = "followup")]
     FollowUpConsultation,
     
     // 15-45 minutes, urgent care, highest priority
@@ -641,6 +645,7 @@ impl AppointmentType {
     pub fn default_duration_minutes(&self) -> i32 {
         match self {
             AppointmentType::InitialConsultation => 45,
+            AppointmentType::GeneralConsultation => 30,
             AppointmentType::FollowUpConsultation => 20,
             AppointmentType::EmergencyConsultation => 30,
             AppointmentType::PrescriptionRenewal => 10,
@@ -653,6 +658,7 @@ impl AppointmentType {
     pub fn default_buffer_minutes(&self) -> i32 {
         match self {
             AppointmentType::InitialConsultation => 15,  // More time for documentation
+            AppointmentType::GeneralConsultation => 10,
             AppointmentType::FollowUpConsultation => 10,
             AppointmentType::EmergencyConsultation => 5,  // Quick turnaround needed
             AppointmentType::PrescriptionRenewal => 5,
@@ -671,6 +677,7 @@ impl AppointmentType {
             AppointmentType::EmergencyConsultation => 100,
             AppointmentType::InitialConsultation => 80,
             AppointmentType::SpecialtyConsultation => 70,
+            AppointmentType::GeneralConsultation => 65,
             AppointmentType::FollowUpConsultation => 60,
             AppointmentType::TelehealthCheckIn => 40,
             AppointmentType::PrescriptionRenewal => 30,
@@ -681,7 +688,7 @@ impl AppointmentType {
 
 impl Default for AppointmentType {
     fn default() -> Self {
-        AppointmentType::FollowUpConsultation
+        AppointmentType::GeneralConsultation
     }
 }
 

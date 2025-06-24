@@ -582,7 +582,7 @@ pub fn new(config: &AppConfig) -> Self {
                 end_time: slot_end,
                 duration_minutes,
                 timezone: timezone.to_string(),
-                appointment_type: AppointmentType::FollowUpConsultation, // Default
+                appointment_type: AppointmentType::GeneralConsultation, // Default
                 buffer_minutes: 10, // Default buffer
                 is_concurrent_available: false,
                 max_concurrent_patients: 1,
