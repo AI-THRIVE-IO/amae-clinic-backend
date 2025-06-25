@@ -9,6 +9,7 @@ use axum_extra::TypedHeader;
 use headers::{Authorization, authorization::Bearer};
 use serde_json::{json, Value};
 use serde::Deserialize;
+use tracing;
 use uuid::Uuid;
 
 use shared_config::AppConfig;
@@ -409,15 +410,26 @@ pub async fn video_health_check(
     let cloudflare_client = crate::services::CloudflareRealtimeClient::new(&state)
         .map_err(|e| AppError::Internal(e.to_string()))?;
     
-    let cloudflare_healthy = cloudflare_client
-        .health_check()
-        .await
-        .unwrap_or(false);
+    // Perform health check with detailed error reporting
+    let (cloudflare_healthy, health_details) = match cloudflare_client.health_check().await {
+        Ok(healthy) => (healthy, if healthy {
+            "API connectivity and authentication confirmed".to_string()
+        } else {
+            "API reachable but health check failed".to_string()
+        }),
+        Err(e) => {
+            // Log the actual error for debugging
+            tracing::error!("Cloudflare health check error: {}", e);
+            (false, format!("Connectivity error: {}", e))
+        }
+    };
     
     Ok(Json(json!({
         "status": if cloudflare_healthy { "healthy" } else { "unhealthy" },
         "video_configured": true,
         "cloudflare_status": if cloudflare_healthy { "connected" } else { "error" },
+        "health_details": health_details,
+        "api_endpoint": format!("{}/apps/{}", state.cloudflare_realtime_base_url, state.cloudflare_realtime_app_id),
         "message": if cloudflare_healthy {
             "Video conferencing system is operational"
         } else {

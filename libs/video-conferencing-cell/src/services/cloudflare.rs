@@ -274,25 +274,67 @@ impl CloudflareRealtimeClient {
     }
 
     /// Health check for Cloudflare Realtime API
+    /// Tests connectivity by attempting a session creation with minimal SDP
+    /// This validates authentication, network connectivity, and API availability
     pub async fn health_check(&self) -> Result<bool, VideoConferencingError> {
         debug!("Performing Cloudflare Realtime API health check");
 
-        // Test API connectivity with a minimal request
-        let url = format!("{}/apps/{}", self.base_url, self.app_id);
+        // Test API connectivity with session creation endpoint (the only reliable way)
+        let url = format!("{}/apps/{}/sessions/new", self.base_url, self.app_id);
+
+        // Use minimal SDP that will fail validation but confirm API connectivity
+        let test_payload = serde_json::json!({
+            "sessionDescription": {
+                "type": "offer",
+                "sdp": "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n"
+            }
+        });
 
         let response = self
             .client
-            .get(&url)
+            .post(&url)
             .header("Authorization", format!("Bearer {}", self.api_token))
+            .header("Content-Type", "application/json")
+            .json(&test_payload)
             .send()
             .await?;
 
-        let is_healthy = response.status().is_success() || response.status() == 404; // 404 is expected for app info endpoint
+        let status_code = response.status().as_u16();
+        let response_text = response.text().await.unwrap_or_default();
+        
+        // Health check passes if:
+        // - 400: API reachable, auth valid, expected SDP validation error
+        // - 200-299: Unexpected success (shouldn't happen with minimal SDP)
+        // - 401/403: Authentication issues (unhealthy)
+        // - 500+: Server errors (unhealthy)
+        // - Network errors: Caught by reqwest error (unhealthy)
+        let is_healthy = match status_code {
+            400 => {
+                // Expected: Invalid SDP format means API is working
+                debug!("Health check received expected 400 error: {}", response_text);
+                true
+            },
+            200..=299 => {
+                // Unexpected but healthy
+                info!("Health check unexpectedly succeeded: {}", response_text);
+                true
+            },
+            401 | 403 => {
+                // Authentication issues
+                error!("Health check failed - authentication error {}: {}", status_code, response_text);
+                false
+            },
+            _ => {
+                // Server errors or other issues
+                error!("Health check failed - server error {}: {}", status_code, response_text);
+                false
+            }
+        };
         
         if is_healthy {
-            info!("Cloudflare Realtime API health check passed");
+            info!("Cloudflare Realtime API health check passed - API is reachable and authenticated");
         } else {
-            warn!("Cloudflare Realtime API health check failed: {}", response.status());
+            warn!("Cloudflare Realtime API health check failed with status: {}", status_code);
         }
 
         Ok(is_healthy)
