@@ -4,6 +4,8 @@ use axum::{
     response::Json,
     Extension,
 };
+use axum_extra::TypedHeader;
+use headers::{Authorization, authorization::Bearer};
 use serde_json::{json, Value};
 use tracing::{error, info};
 use uuid::Uuid;
@@ -23,6 +25,7 @@ use crate::{
 /// Enqueue a smart booking request
 pub async fn enqueue_smart_booking(
     State(config): State<Arc<AppConfig>>,
+    TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
     Extension(user): Extension<User>,
     Json(request): Json<SmartBookingRequest>,
 ) -> Result<Json<Value>, AppError> {
@@ -38,8 +41,8 @@ pub async fn enqueue_smart_booking(
         AppError::Internal("Service initialization failed".to_string())
     })?;
 
-    // Enqueue the booking request
-    let auth_token = "authenticated_user"; // In production, extract from JWT
+    // Enqueue the booking request with actual JWT token
+    let auth_token = auth.token();
     let response = consumer.enqueue_booking(request, auth_token).await.map_err(|e| {
         error!("Failed to enqueue booking: {}", e);
         match e {
