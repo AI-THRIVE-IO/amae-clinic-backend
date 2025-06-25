@@ -181,13 +181,20 @@ impl PatientService {
         let mut query_parts = vec![];
 
         if let Some(name) = query.name {
-            query_parts.push(format!("or=(first_name.ilike.%{}%,last_name.ilike.%{}%)", name, name));
+            // Use proper PostgREST OR syntax with URL encoding
+            let name_pattern = format!("%{}%", name);
+            let encoded_name = urlencoding::encode(&name_pattern);
+            query_parts.push(format!("or=(first_name.ilike.{},last_name.ilike.{})", encoded_name, encoded_name));
         }
         if let Some(email) = query.email {
-            query_parts.push(format!("email=ilike.%{}%", email));
+            let email_pattern = format!("%{}%", email);
+            let encoded_email = urlencoding::encode(&email_pattern);
+            query_parts.push(format!("email=ilike.{}", encoded_email));
         }
         if let Some(phone) = query.phone {
-            query_parts.push(format!("phone_number=ilike.%{}%", phone));
+            let phone_pattern = format!("%{}%", phone);
+            let encoded_phone = urlencoding::encode(&phone_pattern);
+            query_parts.push(format!("phone_number=ilike.{}", encoded_phone));
         }
         if let Some(ppsn) = query.ppsn {
             query_parts.push(format!("ppsn=eq.{}", ppsn));

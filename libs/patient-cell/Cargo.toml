@@ -15,6 +15,7 @@ serde_json = "1.0"
 thiserror = "2.0"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
+urlencoding = "2.1"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 
 # Internal dependencies
