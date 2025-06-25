@@ -64,6 +64,22 @@ pub async fn update_patient(
 }
 
 #[axum::debug_handler]
+pub async fn get_patient_profile(
+    State(config): State<Arc<AppConfig>>,
+    TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
+    Extension(user): Extension<User>,
+) -> Result<Json<Value>, AppError> {
+    let service = PatientService::new(&config);
+    
+    // Get patient profile for the current authenticated user
+    let patient = service.get_patient(&user.id, auth.token())
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    
+    Ok(Json(json!(patient)))
+}
+
+#[axum::debug_handler]
 pub async fn search_patients(
     State(config): State<Arc<AppConfig>>,
     TypedHeader(auth): TypedHeader<Authorization<Bearer>>,

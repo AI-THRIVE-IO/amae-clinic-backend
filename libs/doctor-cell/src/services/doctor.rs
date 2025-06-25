@@ -61,6 +61,7 @@ impl DoctorService {
         let doctor_data = json!({
             "first_name": request.first_name,
             "last_name": request.last_name,
+            "full_name": format!("{} {}", request.first_name, request.last_name),
             "email": request.email,
             "specialty": request.specialty,
             "sub_specialty": request.sub_specialty,
